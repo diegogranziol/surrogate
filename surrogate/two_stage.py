@@ -1,16 +1,20 @@
 """Two-stage pipeline.
 
-Stage 1: a tool-using model (Qwen2.5-7B) gathers web evidence.
-Stage 2: a larger reasoning model (Nemotron-Super-49B or Qwen3-32B) sees ONLY
-         the raw tool outputs (not stage 1's reasoning) and produces its own
-         answer with a <think> trace.
+Stage 1: a tool-using model gathers web evidence.
+Stage 2: a reasoning model sees ONLY the raw tool outputs (not stage 1's
+         reasoning) and produces its own answer with a <think> trace.
 
-Two modes:
-- DUAL-ENDPOINT (preferred, no model swap): each stage talks to a different
-  vLLM server simultaneously. Set STAGE1_BASE_URL/STAGE1_MODEL and
-  STAGE2_BASE_URL/STAGE2_MODEL.
-- SINGLE-ENDPOINT (legacy): one server, swap models between stages via
-  surrogate.swap.swap_to().
+Models are NOT hardcoded — each stage's model/endpoint comes from env
+(STAGE{1,2}_MODEL / STAGE{1,2}_BASE_URL). Our current setup (Phase 0+)
+runs Qwen3-8B for BOTH stages on a single GPU. (The original author used
+Qwen2.5-7B + Qwen3-32B/Nemotron-49B; those are just examples, not required.)
+
+Endpoint modes:
+- DUAL-ENDPOINT: each stage talks to a different vLLM server.
+- SINGLE-ENDPOINT + SURROGATE_SKIP_SWAP=1 (what we use): one server, one
+  model for both stages, swap.py bypassed entirely.
+- SINGLE-ENDPOINT legacy: one server, swap models per stage via
+  surrogate.swap.swap_to() (hardwired to the author's old box — avoid).
 """
 from __future__ import annotations
 
@@ -127,6 +131,12 @@ def run_two_stage(
     s2_model = stage2_model or s2_default
 
     dual = (s1_url != s2_url)
+    # Single-GPU Phase-0 path: one manually-started vLLM server serving one
+    # model for BOTH stages. We don't want the swap.py code path (it's hardwired
+    # to the author's old SSH box). SURROGATE_SKIP_SWAP=1 forces "dual" handling
+    # so swap_to() is never called and both stages just hit the same endpoint.
+    if os.environ.get("SURROGATE_SKIP_SWAP") == "1":
+        dual = True
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     bundle = Path(log_root) / f"two-stage-{ts}"
     bundle.mkdir(parents=True, exist_ok=True)
