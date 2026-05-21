@@ -2,10 +2,10 @@
 
   python run_two_stage.py "Which restaurant is the best in Oxford for steak?"
 
-Stage 1 (Qwen2.5-7B) does the tool calling.
-Stage 2 (Qwen3-32B bf16) thinks over the same raw tool outputs and answers.
-Both vLLM models are swapped sequentially on the remote box; expect ~60-90s
-of model-reload overhead between stages.
+Stage 1 does the tool calling; Stage 2 reasons over the raw tool outputs.
+Models come from .env (STAGE{1,2}_MODEL). Our setup: Qwen3-8B for both
+stages on one vLLM server, SURROGATE_SKIP_SWAP=1 (no model swapping, no
+reload overhead between stages).
 """
 from __future__ import annotations
 
