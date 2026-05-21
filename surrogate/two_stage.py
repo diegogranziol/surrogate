@@ -66,20 +66,38 @@ def _extract_tool_outputs(log_dir: Path) -> list[dict]:
     return [by_id[i] for i in order if "call" in by_id[i]]
 
 
-def _build_stage2_user_message(question: str, tool_pairs: list[dict]) -> str:
-    if not tool_pairs:
+def _build_stage2_user_message(
+    question: str,
+    tool_pairs: list[dict],
+    extra_evidence: str = "",
+) -> str:
+    """Compose the Stage-2 user message.
+
+    `tool_pairs` are the Stage-1 tool-call/result pairs (web_search / fetch_url).
+    `extra_evidence` is an optional block appended verbatim — used by the
+    user-RAG path to inject retrieved user-provided sources alongside the
+    web evidence. The Stage-2 instruction is unchanged: think over the
+    evidence and answer with citations.
+    """
+    have_tools = bool(tool_pairs)
+    have_extra = bool(extra_evidence and extra_evidence.strip())
+    if not have_tools and not have_extra:
         return (
             f"QUESTION: {question}\n\n"
             "EVIDENCE: (no tools were called; nothing to review)\n\n"
-            "Answer the question and say clearly that no web evidence was available."
+            "Answer the question and say clearly that no evidence was available."
         )
-    parts = [f"QUESTION: {question}", "", "EVIDENCE GATHERED FROM TOOL CALLS:"]
-    for i, pair in enumerate(tool_pairs, 1):
-        call = pair["call"]
-        result = pair.get("result", {})
-        parts.append("")
-        parts.append(f"---- Source {i}: {call['name']}({json.dumps(call.get('args', {}), ensure_ascii=False)}) ----")
-        parts.append(str(result.get("result") or result.get("error") or "(no result)"))
+    parts = [f"QUESTION: {question}", ""]
+    if have_tools:
+        parts.append("EVIDENCE GATHERED FROM TOOL CALLS:")
+        for i, pair in enumerate(tool_pairs, 1):
+            call = pair["call"]
+            result = pair.get("result", {})
+            parts.append("")
+            parts.append(f"---- Source {i}: {call['name']}({json.dumps(call.get('args', {}), ensure_ascii=False)}) ----")
+            parts.append(str(result.get("result") or result.get("error") or "(no result)"))
+    if have_extra:
+        parts.append(extra_evidence.strip())
     parts.append("")
     parts.append("Now, using ONLY the evidence above, think step by step and provide your best answer to the QUESTION. Cite specific source URLs.")
     return "\n".join(parts)
@@ -124,6 +142,8 @@ def run_two_stage(
     stage1_model: str | None = None,
     stage2_model: str | None = None,
     log_root: str = "logs",
+    use_rag: bool = False,
+    rag_k: int = 5,
 ) -> TwoStageResult:
     s1_url, s1_default = _resolve_endpoint("1")
     s2_url, s2_default = _resolve_endpoint("2")
@@ -176,7 +196,16 @@ def run_two_stage(
         from surrogate.swap import swap_to
         swap_to(s2_model)
 
-    user_msg = _build_stage2_user_message(question, tool_pairs)
+    rag_block, rag_hits = "", []
+    if use_rag:
+        try:
+            from surrogate.rag import build_rag_evidence_block
+            rag_block, rag_hits = build_rag_evidence_block(question, k=rag_k)
+            print(f"[stage1] RAG retrieved {len(rag_hits)} user-source chunk(s)")
+        except Exception as e:
+            print(f"[stage1] RAG disabled: {e!r}")
+
+    user_msg = _build_stage2_user_message(question, tool_pairs, extra_evidence=rag_block)
     (bundle / "stage2-input.md").write_text(
         f"# Stage 2 input\n\n## system\n```\n{STAGE2_SYSTEM}\n```\n\n## user\n```\n{user_msg}\n```\n"
     )
@@ -198,6 +227,12 @@ def run_two_stage(
         sampling={"samples": STAGE2_SAMPLES},
         user_question=question,
         evidence_chars=sum(len(str(p.get("result", {}).get("result") or "")) for p in tool_pairs),
+        rag_used=use_rag,
+        rag_hits=[
+            {"url": h["url"], "title": h["title"], "score": h["score"],
+             "chunk_idx": h["chunk_idx"], "chars": len(h["text"])}
+            for h in rag_hits
+        ],
     )
 
     # Loop over sampling configs: sample 0 = greedy reference; 1..4 = high-T.
@@ -302,3 +337,139 @@ def run_two_stage(
         stage2=StageResult(s2_model, s2_answer, reasoning, s2_log.dir, s2_dur),
         bundle_dir=bundle,
     )
+
+
+# ---------------------------------------------------------------------------
+# DOM-pair entry point: bypass Stage 1, feed two user-specified URLs' DOMs
+# straight into Stage 2 as the entire evidence pack. The "DOM crawler that
+# takes two websites as input" presentation flow.
+# ---------------------------------------------------------------------------
+
+def run_with_dom_pair(
+    question: str,
+    url_a: str,
+    url_b: str,
+    *,
+    stage2_model: str | None = None,
+    log_root: str = "logs",
+) -> dict:
+    """Run a Stage-2-only pass over two user-specified URLs.
+
+    Returns a dict with the canonical (greedy) answer + thinking, the full
+    5-sample list, the two DOM crawl results, and the bundle path. No tools
+    are called; the surrogate reasons over exactly the two pages the user
+    chose.
+    """
+    from surrogate.tools.dom import compare_doms  # avoid heavy import at module load
+
+    s2_url, s2_default = _resolve_endpoint("2")
+    s2_model = stage2_model or s2_default
+    ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+    bundle = Path(log_root) / f"dom-pair-{ts}"
+    bundle.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n========== DOM CRAWL ==========")
+    print(f"  A: {url_a}")
+    print(f"  B: {url_b}")
+    pair = compare_doms(url_a, url_b, query=question)
+    print(f"  A: ok={pair['ok_a']}  | B: ok={pair['ok_b']}")
+
+    user_msg = (
+        pair["evidence_block"]
+        + "\n\nNow, using ONLY the evidence above from Website A and Website B, "
+          "think step by step and provide your best answer to the QUESTION. "
+          "Where they disagree, weigh the sources and explain your choice. "
+          "Cite specific source URLs in your answer."
+    )
+    (bundle / "stage2-input.md").write_text(
+        f"# Stage 2 input (DOM pair)\n\n## system\n```\n{STAGE2_SYSTEM}\n```\n\n"
+        f"## user\n```\n{user_msg}\n```\n"
+    )
+
+    print(f"\n========== STAGE 2: {s2_model} @ {s2_url} ==========")
+    s2_log = TraceLogger(question, log_root=str(bundle))
+    s2_log.dir = s2_log.dir.with_name(s2_log.dir.name + "-stage2")
+    s2_log.dir.mkdir(parents=True, exist_ok=True)
+    s2_log._jsonl.close(); s2_log._md.close()
+    s2_log._jsonl = (s2_log.dir / "trace.jsonl").open("a", encoding="utf-8")
+    s2_log._md = (s2_log.dir / "transcript.md").open("a", encoding="utf-8")
+
+    client = OpenAI(base_url=s2_url, api_key="EMPTY")
+    msgs = [{"role": "system", "content": STAGE2_SYSTEM},
+            {"role": "user", "content": user_msg}]
+    s2_log.event(
+        "session_start",
+        model=s2_model, base_url=s2_url,
+        system=STAGE2_SYSTEM, tools=[],
+        sampling={"samples": STAGE2_SAMPLES},
+        user_question=question,
+        mode="dom_pair",
+        url_a=url_a, url_b=url_b,
+        dom_a_ok=pair["ok_a"], dom_b_ok=pair["ok_b"],
+        evidence_chars=len(user_msg),
+    )
+
+    samples: list[dict] = []
+    t_total = 0.0
+    for sample_idx, cfg in enumerate(STAGE2_SAMPLES):
+        s2_log.event("llm_request", step=sample_idx, sample_index=sample_idx,
+                     messages=msgs, tools=[], **cfg)
+        t0 = time.time()
+        try:
+            resp = client.chat.completions.create(
+                model=s2_model, messages=msgs,
+                temperature=cfg["temperature"], top_p=cfg["top_p"],
+                max_tokens=cfg["max_tokens"],
+                extra_body={"chat_template_kwargs": {"enable_thinking": True}},
+            )
+            dur = time.time() - t0; t_total += dur
+            m = resp.choices[0].message
+            reasoning = (
+                getattr(m, "reasoning", None)
+                or getattr(m, "reasoning_content", None)
+                or (m.model_extra or {}).get("reasoning")
+                or (m.model_extra or {}).get("reasoning_content")
+            )
+            content = m.content or ""
+            s2_log.event("llm_response", step=sample_idx, sample_index=sample_idx,
+                         temperature=cfg["temperature"], duration_s=dur,
+                         reasoning_content=reasoning, content=content,
+                         tool_calls=[],
+                         usage=resp.usage.model_dump() if resp.usage else None,
+                         finish_reason=resp.choices[0].finish_reason)
+            samples.append({
+                "sample_index": sample_idx, "temperature": cfg["temperature"],
+                "duration_s": dur, "reasoning": reasoning, "content": content,
+            })
+            print(f"  [sample {sample_idx}  T={cfg['temperature']}  {dur:.1f}s  "
+                  f"tokens {(resp.usage.prompt_tokens if resp.usage else '?')}+"
+                  f"{(resp.usage.completion_tokens if resp.usage else '?')}]")
+        except Exception as e:
+            dur = time.time() - t0; t_total += dur
+            s2_log.event("llm_error", step=sample_idx, sample_index=sample_idx,
+                         temperature=cfg["temperature"], duration_s=dur,
+                         error=repr(e))
+            samples.append({
+                "sample_index": sample_idx, "temperature": cfg["temperature"],
+                "duration_s": dur, "reasoning": None, "content": f"[error: {e!r}]",
+            })
+            print(f"  [sample {sample_idx}  T={cfg['temperature']}  {dur:.1f}s]  ERROR {e!r}")
+
+    s2_answer = samples[0]["content"] if samples else ""
+    reasoning = samples[0]["reasoning"] if samples else None
+    s2_log.event("final_answer", content=s2_answer, source_sample=0)
+    s2_log.close()
+    print(f"\n--- stage 2 total time across {len(samples)} samples: {t_total:.1f}s ---")
+    print(f"[bundle] {bundle}")
+
+    return {
+        "question": question,
+        "url_a": url_a, "url_b": url_b,
+        "dom_pair": pair,
+        "model": s2_model,
+        "answer": s2_answer,
+        "thinking": reasoning,
+        "samples": samples,
+        "duration_s": t_total,
+        "bundle_dir": str(bundle),
+    }
