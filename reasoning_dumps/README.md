@@ -34,3 +34,13 @@ source bundle, Stage 1 tool calls), then every Stage 2 sample's full
   — first z.ai REFERENCE call (Phase 1 smoke). glm-4.6, no evidence (answered
   from internal knowledge, web_search=0). NOT yet comparable to try01 — Phase 2
   will re-run the reference WITH the surrogate's gathered evidence.
+- `try03_2026-05-21T19-13-24_qwen3-8b_dom-pair_*.md`
+  — DOM-pair flow: surrogate reasons over two user-specified URLs (Wanderlog +
+  AdventuresOfLilNicki blog), Stage 1 bypassed. 5/5 samples; greedy picks
+  Affresco citing the blog's "Italian" category. 40KB verbatim.
+- `try04_2026-05-21T19-14-53_qwen3-8b_rag_*.md`
+  — Surrogate + user-RAG end-to-end. Stage 1 web tools picked Sette; Stage 2
+  with the user's "Affresco truffle pasta was the best" note injected via
+  RAG switched the recommendation to **Affresco**, citing the user as
+  "User-source 1" in its final answer. The cleanest single proof of the
+  user-RAG deliverable.
