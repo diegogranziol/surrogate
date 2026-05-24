@@ -6,6 +6,8 @@ logs/
 runs/
 backtests/
 userlinks/
+box_config.json
+box_presets.json
 .ipynb_checkpoints/
 .claude/
 .DS_Store

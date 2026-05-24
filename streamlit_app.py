@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import textwrap
+import time
 import traceback
 
 import streamlit as st
@@ -21,15 +22,18 @@ from surrogate.rag import (
 )
 
 st.set_page_config(page_title="Surrogate + User-RAG", layout="wide")
-st.title("Surrogate + User-RAG")
-st.caption(
-    "Bring your own web links into the surrogate's evidence. Stage 1's "
-    "web search still runs; user chunks are appended to Stage 2's evidence "
-    "pack so the answer is grounded in BOTH the live web and your own sources."
+st.title(
+    "Surrogate + User-RAG",
+    help=(
+        "Bring your own web links into the surrogate's evidence. Stage 1's "
+        "web search still runs; user chunks are appended to Stage 2's "
+        "evidence pack so the answer is grounded in BOTH the live web and "
+        "your own sources."
+    ),
 )
 
-tab_ingest, tab_docs, tab_ask, tab_dom = st.tabs(
-    ["Ingest", "Documents", "Ask", "Compare two URLs"]
+tab_ingest, tab_docs, tab_ask, tab_dom, tab_settings = st.tabs(
+    ["Ingest", "Documents", "Ask", "Compare two URLs", "Settings"]
 )
 
 # ----- INGEST ----------------------------------------------------------------
@@ -146,13 +150,15 @@ with tab_ask:
 # ----- COMPARE TWO URLs (the DOM-crawler presentation flow) -----------------
 
 with tab_dom:
-    st.subheader("Compare two URLs")
-    st.caption(
-        "Paste two web pages. We crawl each one's full DOM (richer than the "
-        "agent's `fetch_url`: headings, lists, tables, ratings/prices, top "
-        "links), pack both into the model's evidence, and Stage 2 answers + "
-        "thinks over them. No tools are called — the surrogate reasons over "
-        "exactly the two pages you chose."
+    st.subheader(
+        "Compare two URLs",
+        help=(
+            "Paste two web pages. We crawl each one's full DOM (richer than "
+            "the agent's `fetch_url`: headings, lists, tables, ratings/prices, "
+            "top links), pack both into the model's evidence, and Stage 2 "
+            "answers + thinks over them. No tools are called — the surrogate "
+            "reasons over exactly the two pages you chose."
+        ),
     )
     col_a, col_b = st.columns(2)
     with col_a:
@@ -212,3 +218,307 @@ with tab_dom:
         except Exception as e:
             st.error(f"DOM-pair run failed: {e!r}")
             st.text(traceback.format_exc())
+
+
+# ----- SETTINGS (box config + tunnel control) -------------------------------
+
+with tab_settings:
+    from surrogate import box
+
+    # Push any persisted settings into os.environ on every page load so the
+    # running process always reflects the JSON (e.g. REFERENCE_MODEL).
+    box.apply_to_env()
+
+    st.subheader(
+        "Remote GPU box & tunnel",
+        help=(
+            "Where the surrogate's vLLM endpoint lives. Saved to "
+            "`box_config.json` (gitignored) so 'last used' values persist "
+            "between sessions. The tunnel keeper (`scripts/keep_tunnel.sh`) "
+            "is restarted with these values when you click Save & Restart. "
+            "The reference-model field controls which GLM model surrogate."
+            "reference and the backtest harness use; it takes effect on the "
+            "next call, no restart."
+        ),
+    )
+
+    status = box.status_summary()
+    s = status["settings"]
+    last = s.get("last_used", "never saved")
+
+    # Compact status row — short labels, tooltips for detail.
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        if status["keeper_running"]:
+            st.success("Tunnel: running",
+                       icon="🟢")
+        else:
+            st.warning("Tunnel: stopped", icon="⚪")
+    with c2:
+        ep = status["endpoint"]
+        if ep["ok"]:
+            st.success(f"Endpoint: {ep['model']}", icon="🟢")
+        else:
+            st.error("Endpoint: unreachable", icon="🔴")
+    with c3:
+        st.info(f"Last saved: {last}", icon="💾")
+
+    st.divider()
+
+    ADD_NEW = "+ Add new preset…"
+    all_presets = box.all_presets()
+    preset_labels = [
+        n if box.is_factory_preset(n) else f"{n}  · custom"
+        for n in all_presets.keys()
+    ] + [ADD_NEW]
+    label_to_name = {lbl: name for lbl, name in zip(preset_labels, all_presets.keys())}
+
+    cp1, cp2 = st.columns([3, 1], vertical_alignment="bottom")
+    with cp1:
+        chosen_label = st.selectbox(
+            "Quick preset",
+            preset_labels,
+            index=0,
+            help=("Pick a preset to fill the form below. "
+                  "Pick '+ Add new preset…' to create one — Save / Save & "
+                  "Connect will then also persist it under the name you give. "
+                  "Custom presets can be deleted from here."),
+        )
+    creating_new = (chosen_label == ADD_NEW)
+    selected_name = None if creating_new else label_to_name[chosen_label]
+
+    with cp2:
+        if not creating_new:
+            if st.button("Load into form", use_container_width=True):
+                preset = all_presets[selected_name].copy()
+                for k, v in preset.items():
+                    st.session_state[f"box_{k}"] = v
+                st.rerun()
+        # In "+ Add new" mode the right column stays empty — the form below
+        # with its "Name for the new preset" field makes the next step obvious.
+
+    # When a custom preset is selected, offer a one-click delete here too.
+    if selected_name is not None and not box.is_factory_preset(selected_name):
+        if st.button(f"🗑 Delete preset '{selected_name}'"):
+            if box.delete_user_preset(selected_name):
+                st.success(f"Deleted '{selected_name}'.")
+                st.rerun()
+
+    def _sv(key: str, default):
+        return st.session_state.get(f"box_{key}", s.get(key, default))
+
+    with st.form("box_form"):
+        if creating_new:
+            new_preset_name = st.text_input(
+                "Name for the new preset",
+                key="new_preset_name",
+                placeholder="e.g. vast-4090-may, lab-h100, mithril-backup",
+                help="When you click Save or Save & Connect, the form values "
+                     "below will also be persisted under this name and show "
+                     "up in the dropdown next time.",
+            )
+        else:
+            new_preset_name = ""
+        ca, cb = st.columns(2)
+        with ca:
+            host = st.text_input(
+                "Host", value=_sv("host", ""),
+                key="box_host", placeholder="44.250.249.199",
+                help="The remote box's IP or hostname.",
+            )
+            user = st.text_input(
+                "SSH user", value=_sv("user", "ubuntu"),
+                key="box_user",
+                help="Mithril → ubuntu. vast.ai → root. Most clouds → ubuntu.",
+            )
+            port = st.number_input(
+                "SSH port", min_value=1, max_value=65535,
+                value=int(_sv("port", 22)), step=1, key="box_port",
+                help="Mithril → 22. vast.ai → look at the provider's SSH command.",
+            )
+        with cb:
+            key = st.text_input(
+                "SSH key", value=_sv("key", ""), key="box_key",
+                placeholder="/Users/you/ulusha-key.pem",
+                help=(
+                    "Path to your private key .pem. Leave empty to fall back "
+                    "to ~/.ssh/config or the ssh-agent."
+                ),
+            )
+            local_port = st.number_input(
+                "Local port", min_value=1, max_value=65535,
+                value=int(_sv("local_port", 8000)), step=1,
+                key="box_local_port",
+                help=(
+                    "Mac side of the tunnel. The rest of the code expects "
+                    "8000 — only change this if you know why."
+                ),
+            )
+        st.markdown("")  # small spacer
+        reference_model = st.text_input(
+            "Reference model (GLM)",
+            value=_sv("reference_model", "glm-4.6"),
+            key="box_reference_model",
+            placeholder="glm-4.6",
+            help=(
+                "GLM model used by surrogate.reference and the backtest "
+                "harness (the 'frontier' comparator). Common values: "
+                + ", ".join(box.REFERENCE_MODEL_SUGGESTIONS)
+                + ". Changing this takes effect on the next call — no tunnel "
+                "restart needed."
+            ),
+        )
+        cs1, cs2, cs3 = st.columns(3)
+        test_only = cs1.form_submit_button("🔌 Test endpoint")
+        save_only = cs2.form_submit_button("💾 Save")
+        save_restart = cs3.form_submit_button(
+            "🚀 Save & Connect", type="primary",
+            help=(
+                "Saves, then makes the box ready for use: install vLLM + "
+                "ninja if missing, launch Qwen3-8B, restart the tunnel, "
+                "wait until the endpoint is alive. Idempotent — skips "
+                "anything already done. Takes up to ~10 min on a fresh box."
+            ),
+        )
+
+    if save_only or save_restart:
+        new = {
+            "host": host.strip(), "user": user.strip() or "ubuntu",
+            "port": int(port), "key": key.strip(),
+            "local_port": int(local_port),
+            "reference_model": reference_model.strip() or "glm-4.6",
+        }
+        saved = box.save_settings(new)
+        # If we're in "Add new" mode, ALSO persist these values as a named
+        # preset so they show up in the dropdown next time.
+        if creating_new:
+            name = (new_preset_name or "").strip()
+            if not name:
+                st.warning("Pick a name in 'Name for the new preset' to also "
+                           "save these values as a preset (active config still "
+                           "saved).")
+            elif box.is_factory_preset(name):
+                st.warning(f"'{name}' clashes with a factory preset name. "
+                           "Active config saved; preset not created.")
+            else:
+                box.save_user_preset(name, new)
+                st.success(f"Preset '{name}' saved · also active config "
+                           f"({saved['last_used']})", icon="💾")
+        else:
+            st.success(
+                f"Saved · {saved['last_used']} · reference = {saved['reference_model']}",
+                icon="💾",
+            )
+        if save_restart:
+            # Provision the box (idempotent), restart the tunnel, verify.
+            # One row per stage that updates IN PLACE — no scrollback wall.
+            with st.status(
+                f"connecting to {saved['host']}…",
+                expanded=True,
+            ) as status:
+                slots: dict[str, "object"] = {}
+
+                def on_progress(stage, msg, ok=True):
+                    if stage not in slots:
+                        slots[stage] = status.empty()
+                    mark = "" if ok else " ⚠"
+                    slots[stage].markdown(f"`{stage}`  {msg}{mark}")
+                    short = msg if len(msg) <= 70 else msg[:67] + "…"
+                    status.update(label=f"{stage}: {short}")
+
+                prov = box.provision_remote(saved, on_progress=on_progress)
+
+                if prov.get("ok"):
+                    on_progress("tunnel", "restarting…")
+                    box.restart_tunnel(saved)
+                    time.sleep(2)
+                    ep = box.is_endpoint_alive(local_port=saved["local_port"])
+                    if ep["ok"]:
+                        on_progress("tunnel", f"connected · {ep['model']}")
+                        status.update(
+                            label=f"connected · {ep['model']} on {saved['host']}",
+                            state="complete", expanded=False,
+                        )
+                    else:
+                        on_progress("tunnel",
+                                    f"endpoint not answering yet: {ep['error']}", ok=False)
+                        status.update(
+                            label="provisioned but endpoint not verified",
+                            state="error", expanded=True,
+                        )
+                else:
+                    err = (prov.get("error") or "")[:200]
+                    status.update(
+                        label=f"failed at {prov.get('stage')}: {err}",
+                        state="error", expanded=True,
+                    )
+    elif test_only:
+        # Probe the values the user TYPED (not the saved/active tunnel).
+        # SSHes straight to the entered host and asks the box whether vLLM
+        # is up — so the user can validate a config before persisting it.
+        candidate = {
+            "host": host.strip(), "user": user.strip() or "ubuntu",
+            "port": int(port), "key": key.strip(),
+            "local_port": int(local_port),
+        }
+        with st.spinner(f"SSHing to {candidate['host']}:{candidate['port']} …"):
+            res = box.probe_remote(candidate)
+
+        # Compact two-line status — SSH layer + vLLM layer
+        if res["ssh_ok"] and res["vllm_ok"]:
+            st.success(
+                f"✅ SSH reached **{candidate['host']}**  ·  "
+                f"✅ vLLM responding (`{res['model']}`)",
+                icon="🟢",
+            )
+            st.info(
+                "Looks good — click **💾 Save** (or **🔄 Save & Restart**) "
+                "above to keep these values and point the tunnel at this box.",
+                icon="💡",
+            )
+        elif res["ssh_ok"] and not res["vllm_ok"]:
+            st.warning(
+                f"✅ SSH reached **{candidate['host']}**  ·  "
+                "⚠️ vLLM not running on the box yet",
+                icon="🟡",
+            )
+            with st.expander("What to do"):
+                st.write(
+                    "The box is reachable but no vLLM is serving on port "
+                    "8000 there. Two routes:\n\n"
+                    "- **Provision the box** — install vLLM and launch "
+                    "Qwen3-8B on it. From the Mac terminal: SSH in and run "
+                    "the commands in `commands.txt` *Phase 0 — On the GPU "
+                    "box*, or ask the assistant to drive the provisioning "
+                    "for you over SSH.\n"
+                    "- If vLLM IS running but on a different port, change "
+                    "the launch command to use `--port 8000` (the rest of "
+                    "the code expects that)."
+                )
+        else:
+            st.error(f"❌ Can't reach the box over SSH", icon="🔴")
+            with st.expander("Error detail / common causes"):
+                st.code(res["error"])
+                st.write(
+                    "Common causes:\n"
+                    "- **Host / port wrong** — double-check the provider's "
+                    "SSH command.\n"
+                    "- **Key wrong** — leave empty if the box uses your "
+                    "ssh-agent / `~/.ssh/config` (vast.ai), or set the full "
+                    "path to the `.pem` if the provider issued one "
+                    "(Mithril).\n"
+                    "- **Box paused / destroyed** — check the provider "
+                    "dashboard.\n"
+                    "- **First-time host key prompt** — we accept "
+                    "new keys automatically; if you see a different "
+                    "host-key error, that's a man-in-the-middle warning "
+                    "and worth investigating."
+                )
+
+    st.divider()
+    with st.expander("Tunnel keeper log (last 40 lines)"):
+        try:
+            lines = box.KEEPER_LOG.read_text().splitlines()[-40:]
+            st.code("\n".join(lines) or "(empty)")
+        except FileNotFoundError:
+            st.write("(no log yet)")

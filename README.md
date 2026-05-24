@@ -203,6 +203,22 @@ runs Stage 2 directly over that packed evidence. The Streamlit
 **Compare two URLs** tab is the user-facing entry point. The presentation
 demo lives in `scripts/dom_demo.py`.
 
+## Switching the GPU box (no script edits)
+
+`box_config.json` (gitignored) holds host / user / port / key / local_port +
+a "last_used" timestamp. The Streamlit **Settings** tab is the friendly
+interface: pick a preset (Mithril / vast.ai / Custom), edit any field,
+click *Save & Restart tunnel*. The bash keeper is restarted with the new
+env vars; status badges and a *Test endpoint* button confirm health.
+Same control is available programmatically:
+
+```python
+from surrogate.box import save_settings, restart_tunnel
+save_settings({"host": "NEW_IP", "user": "ubuntu", "port": 22,
+               "key": "/path/to/key.pem", "local_port": 8000})
+restart_tunnel()
+```
+
 ## Ops notes (real things that bit us)
 
 - **Mithril/cloud cgroup cleanup kills detached processes when SSH ends.**

@@ -33,8 +33,24 @@ except Exception:
 
 
 ZAI_BASE_URL = os.environ.get("ZAI_BASE_URL", "https://api.z.ai/api/anthropic")
+# REFERENCE_MODEL / THINKING_BUDGET are re-read from env at every call (see
+# `current_reference_model()` and `ask_reference`) so the Settings tab can
+# change them without forcing a process restart. The module-level constants
+# stay as the import-time snapshot for backward compat / display.
 REFERENCE_MODEL = os.environ.get("REFERENCE_MODEL", "glm-4.6")
 THINKING_BUDGET = int(os.environ.get("REFERENCE_THINKING_BUDGET", "2048"))
+
+
+def current_reference_model() -> str:
+    """Live value of REFERENCE_MODEL, re-read from env on each call."""
+    return os.environ.get("REFERENCE_MODEL", REFERENCE_MODEL)
+
+
+def current_thinking_budget() -> int:
+    try:
+        return int(os.environ.get("REFERENCE_THINKING_BUDGET", THINKING_BUDGET))
+    except ValueError:
+        return THINKING_BUDGET
 
 
 def _client() -> Anthropic:
@@ -79,7 +95,7 @@ def ask_reference(
     apples). Phase 1 just passes the bare question.
     """
     client = _client()
-    mdl = model or REFERENCE_MODEL
+    mdl = model or current_reference_model()
 
     user = question if not evidence else f"{question}\n\nEVIDENCE:\n{evidence}"
     msgs = [{"role": "user", "content": user}]
@@ -93,7 +109,7 @@ def ask_reference(
         if thinking:
             resp = client.messages.create(
                 **base_kwargs,
-                thinking={"type": "enabled", "budget_tokens": THINKING_BUDGET},
+                thinking={"type": "enabled", "budget_tokens": current_thinking_budget()},
             )
             used_thinking = True
         else:
