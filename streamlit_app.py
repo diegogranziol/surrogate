@@ -106,6 +106,15 @@ with tab_ask:
         horizontal=False,
     )
     k = st.slider("Top-k retrieved chunks", 1, 10, 5)
+    compare_glm = st.checkbox(
+        "Also call GLM reference (same evidence, side-by-side)",
+        value=False,
+        help=(
+            "After the surrogate runs, send the SAME evidence pack to the "
+            "GLM reference (z.ai) and show both answers side-by-side. The "
+            "fair fidelity comparison without running a full backtest."
+        ),
+    )
 
     if st.button("Run", type="primary", disabled=not q.strip()):
         if mode.startswith("Retrieve only"):
@@ -131,20 +140,132 @@ with tab_ask:
                 "evidence). Needs the vLLM endpoint at localhost:8000 to be up "
                 "(keep_tunnel.sh)."
             )
+            # --- 1. try the surrogate run; capture (not raise) any failure ---
+            res = None
+            surrogate_error = None
+            surrogate_tb = None
             try:
                 with st.spinner("Running surrogate two-stage ..."):
                     res = run_two_stage(q, use_rag=True, rag_k=k)
-                st.success(f"Done — bundle: {res.bundle_dir}")
-                st.subheader("Stage 2 answer")
-                st.write(res.stage2.answer or "(empty)")
-                if res.stage2.reasoning:
-                    with st.expander("Stage 2 thinking (verbatim)"):
-                        st.text(res.stage2.reasoning)
-                with st.expander("Stage 1 answer (for reference)"):
-                    st.write(res.stage1.answer or "(empty)")
             except Exception as e:
-                st.error(f"surrogate run failed: {e!r}")
-                st.text(traceback.format_exc())
+                surrogate_error = e
+                surrogate_tb = traceback.format_exc()
+
+            if res is not None:
+                st.success(f"Done — bundle: {res.bundle_dir}")
+
+            # --- 2. if requested, call GLM regardless of surrogate outcome ---
+            ref = None
+            ref_error = None
+            ref_used_full_evidence = False
+            if compare_glm:
+                from surrogate.two_stage import (
+                    _extract_tool_outputs,
+                    _build_stage2_user_message,
+                    STAGE2_SYSTEM,
+                )
+                from surrogate.reference import ask_reference
+                try:
+                    from surrogate.rag import build_rag_evidence_block
+                    rag_block, _ = build_rag_evidence_block(q, k=k)
+                except Exception:
+                    rag_block = ""
+
+                if res is not None:
+                    # SURROGATE OK -> apples-to-apples: same evidence, strict
+                    # "use only the evidence below" system prompt.
+                    tool_pairs = _extract_tool_outputs(res.stage1.log_dir)
+                    ref_used_full_evidence = True
+                    stage2_user = _build_stage2_user_message(
+                        q, tool_pairs, extra_evidence=rag_block
+                    )
+                    ref_sys = STAGE2_SYSTEM
+                    ref_spinner = "Calling GLM reference (same evidence)…"
+                else:
+                    # SURROGATE FAILED -> there is no web evidence. Using
+                    # STAGE2_SYSTEM here would tell the model "use ONLY the
+                    # evidence" and then provide none, so it'd refuse. Instead
+                    # let GLM answer from its memory (+ user RAG if any) — same
+                    # as the backtest's "bare" reference path.
+                    bare_q = q
+                    if rag_block.strip():
+                        bare_q = (
+                            f"{q}\n\nUser-provided context (may be relevant):\n"
+                            f"{rag_block}"
+                        )
+                    stage2_user = bare_q
+                    ref_sys = None
+                    ref_spinner = (
+                        "Calling GLM in bare mode (no surrogate evidence; "
+                        "GLM will answer from memory + your RAG)…"
+                    )
+
+                with st.spinner(ref_spinner):
+                    try:
+                        ref = ask_reference(question=stage2_user, system=ref_sys)
+                    except Exception as e:
+                        ref_error = e
+
+            # --- 3. render ---
+            def _show_friendly_surrogate_error():
+                name = type(surrogate_error).__name__
+                low = str(surrogate_error).lower()
+                if ("connection" in low or "refused" in low
+                        or "apiconnection" in name.lower()
+                        or "timeout" in name.lower()):
+                    st.warning(
+                        "Surrogate not reachable — the GPU box is probably "
+                        "paused, the SSH tunnel is down, or vLLM isn't "
+                        "serving. Open **Settings** to check status or "
+                        "spin the box up.",
+                        icon="🔌",
+                    )
+                else:
+                    st.error(f"Surrogate failed: {surrogate_error!r}", icon="🔴")
+                with st.expander("debug detail"):
+                    st.text(surrogate_tb or "(no traceback)")
+
+            if compare_glm:
+                col_s, col_r = st.columns(2)
+                with col_s:
+                    if res is not None:
+                        st.subheader(f"Surrogate · {res.stage2.model}")
+                        st.write(res.stage2.answer or "(empty)")
+                        if res.stage2.reasoning:
+                            with st.expander("thinking (verbatim)"):
+                                st.text(res.stage2.reasoning)
+                    else:
+                        st.subheader("Surrogate · not run")
+                        _show_friendly_surrogate_error()
+                with col_r:
+                    if ref_error is not None:
+                        st.subheader("Reference · call failed")
+                        st.error(f"GLM call failed: {ref_error!r}", icon="🔴")
+                    elif ref is None:
+                        st.subheader("Reference · skipped")
+                    else:
+                        title = f"Reference · {ref['model']}"
+                        if not ref_used_full_evidence:
+                            title += "  (no web evidence — surrogate not run)"
+                        st.subheader(title)
+                        st.write(ref["answer"] or "(empty)")
+                        if ref.get("thinking"):
+                            with st.expander("thinking (verbatim)"):
+                                st.text(ref["thinking"])
+                if res is not None:
+                    with st.expander("Stage 1 answer (surrogate's agent, for reference)"):
+                        st.write(res.stage1.answer or "(empty)")
+            else:
+                if res is not None:
+                    st.subheader("Stage 2 answer")
+                    st.write(res.stage2.answer or "(empty)")
+                    if res.stage2.reasoning:
+                        with st.expander("Stage 2 thinking (verbatim)"):
+                            st.text(res.stage2.reasoning)
+                    with st.expander("Stage 1 answer (for reference)"):
+                        st.write(res.stage1.answer or "(empty)")
+                else:
+                    _show_friendly_surrogate_error()
 
 
 # ----- COMPARE TWO URLs (the DOM-crawler presentation flow) -----------------
