@@ -4,7 +4,16 @@ __pycache__/
 .env
 logs/
 runs/
+backtests/
+userlinks/
+box_config.json
+box_presets.json
 .ipynb_checkpoints/
 .claude/
 .DS_Store
 .idea/
+
+# Local working notes / restore journal — keep on disk, never push.
+logs.txt
+guide.txt
+commands.txt
