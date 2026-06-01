@@ -241,14 +241,52 @@ stop_and_answer_tool = Tool(
     name="stop_and_answer",
     description=(
         "**Terminating tool.** Call this to finalise your answer with a "
-        "STRUCTURED payload: ranked top_picks (each with name + one-line "
-        "reasoning, optionally rating/price/source_url), a summary paragraph, "
-        "and a citations list. The loop validates the payload against a "
-        "schema before terminating; if validation fails you get one more "
-        "attempt. **Call this AS YOUR FINAL ACTION** — never after this."
+        "STRUCTURED payload. `top_picks` MUST contain 3–5 ranked candidates "
+        "(best first), each with `name`, concrete evidence-grounded "
+        "`reasoning`, and ideally `rating`, `price`, `source_url`. Also "
+        "include a one-paragraph `summary` and a `citations` list. The loop "
+        "validates the payload against a schema; if validation fails you get "
+        "one more attempt. **Call this AS YOUR FINAL ACTION** — never after this."
     ),
     parameters=STOP_AND_ANSWER_PARAMETERS,
     call=_stop_and_answer_call,
+)
+
+
+# ---------------------------------------------------------------------------
+# 7. think — no-op reflection tool (LangChain's `think_tool` pattern).
+#    Forces the model to land a structured checkpoint in the trace.
+# ---------------------------------------------------------------------------
+
+def _think_call(args: dict) -> str:
+    # No-op. The purpose of this tool is the side-effect of the model
+    # emitting a structured reflection that lands in the trace.
+    return "logged"
+
+
+think_tool = Tool(
+    name="think",
+    description=(
+        "Force-write a structured reflection checkpoint into the trace. Call "
+        "AFTER every 2 `search`/`extract_entity` calls AND BEFORE "
+        "`stop_and_answer`. The reflection argument should follow this "
+        "shape: (1) what you've learned so far, (2) what's still uncertain "
+        "or unverified, (3) what's the next best action. Returns 'logged' — "
+        "its job is to make your plan crystallise visibly in the trace, "
+        "not to perform any computation."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "reflection": {
+                "type": "string",
+                "description": ("Structured reflection: 'Learned: ... ; Uncertain: ... ; "
+                                "Next: ...'  Be concise but specific."),
+            },
+        },
+        "required": ["reflection"],
+    },
+    call=_think_call,
 )
 
 
@@ -265,5 +303,6 @@ def default_tools() -> list[Tool]:
         extract_entity_tool,
         verify_fact_tool,
         check_missing_fields_tool,
+        think_tool,
         stop_and_answer_tool,
     ]
