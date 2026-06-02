@@ -95,9 +95,11 @@ Cite only what verifies.
 Before finalising, call `check_missing_fields` on each top candidate; if required fields \
 are missing, run ONE targeted search/extract for those fields, then re-check.
 
-5. **Finalise with `stop_and_answer`** — a structured payload containing **3–5 ranked \
-top_picks** (each with name + one-line evidence-grounded reasoning + rating + price + \
-source_url), a summary paragraph, and a citations list.
+5. **Finalise with `stop_and_answer`** — a structured payload containing ranked `top_picks` \
+(each with name + one-line evidence-grounded reasoning + rating + price + source_url), a \
+summary paragraph, and a citations list. **Match the number of picks to the question**: \
+when the user asks "top N", return N; when they ask "what X should I use", a single \
+confident pick or 2–3 is fine; when they ask "best X" without N, 3–10 is typical.
 
 ## Hard limits
 
@@ -110,7 +112,8 @@ source_url), a summary paragraph, and a citations list.
 
 ## Output rules
 
-- `stop_and_answer.top_picks` must contain **3–5 picks**, ranked best-first. Never just one.
+- `stop_and_answer.top_picks` contains the right number of ranked picks for the question \
+(see Process step 5). Ranked best-first.
 - Each `reasoning` field is concrete and evidence-grounded — "rated 4.8 with 175 reviews on \
 TripAdvisor, praised for wood-fired pizza" — NOT vague praise like "highly recommended".
 - Use inline markdown citations `([title](url))` in the `summary` text.

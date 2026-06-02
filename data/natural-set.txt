@@ -1,0 +1,19 @@
+# Natural set — how people actually ask. No "top N" in the wording.
+# Harness defaults to k=5, mode=natural; the frontier is allowed to answer freely
+# (single confident pick + alternatives, or a short list, whichever fits).
+
+What phone should I get in 2026?
+What's the best supplement brand for whey protein?
+Best Italian restaurant in Tashkent?
+What's the best running shoe for a sub-3 marathon?
+Which noise-cancelling headphones should I buy?
+What's a good electric vehicle for a family of four?
+Best skincare product for adult acne?
+What's the best espresso machine for a home barista?
+Which standing desk should I buy under $500?
+What's the best mechanical keyboard for long coding sessions?
+Which smartwatch is worth buying in 2026?
+Where should I stay in Dubai for a luxury weekend?
+What SUV should I buy in 2026?
+What's a reliable budget laptop for a CS student?
+Which wireless earbuds should I get?

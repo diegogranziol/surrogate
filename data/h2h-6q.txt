@@ -1,0 +1,12 @@
+# Head-to-head 6-question benchmark — 3 structured + 3 natural
+# Run with: .venv/bin/python run_head_to_head.py data/h2h-6q.txt
+
+# --- Structured (top-N specified in the question) ---
+What are the top 10 phones to buy in 2026?
+What are the top 10 best-rated Italian restaurants in Tashkent?
+What are the top 10 noise-cancelling headphones in 2026?
+
+# --- Natural (no top-N specified) ---
+What's the best NMN supplement brand for healthy aging?
+What's the best espresso machine for a home barista?
+What's the best Italian restaurant in Tashkent?

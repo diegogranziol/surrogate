@@ -45,8 +45,11 @@ class Citation(BaseModel):
 
 
 class StopAndAnswerPayload(BaseModel):
-    top_picks: list[TopPick] = Field(..., min_length=3, max_length=10,
-                                     description="3–5 ranked recommendations, best first.")
+    top_picks: list[TopPick] = Field(..., min_length=1, max_length=10,
+                                     description="1–10 ranked recommendations, best first. "
+                                                 "Match the count to the question: a single "
+                                                 "confident pick is fine for 'what X should I "
+                                                 "use', use 3-10 when the question implies a list.")
     summary: str = Field(..., min_length=20,
                          description="Short paragraph reasoning over the top picks.")
     citations: list[Citation] = Field(default_factory=list,
@@ -59,7 +62,7 @@ STOP_AND_ANSWER_PARAMETERS = {
     "properties": {
         "top_picks": {
             "type": "array",
-            "minItems": 3, "maxItems": 10,
+            "minItems": 1, "maxItems": 10,
             "items": {
                 "type": "object",
                 "properties": {
