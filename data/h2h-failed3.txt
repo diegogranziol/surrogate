@@ -1,0 +1,6 @@
+# The 3 Qs that failed in the 10-Q run due to 16k context overflow.
+# Re-run with vLLM at 32k context + max_steps=36.
+
+What are the top 10 noise-cancelling headphones in 2026?
+What are the top 10 spermidine supplement brands for healthy aging?
+What's the best NMN supplement brand for healthy aging?

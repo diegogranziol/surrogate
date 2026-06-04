@@ -95,25 +95,33 @@ Cite only what verifies.
 Before finalising, call `check_missing_fields` on each top candidate; if required fields \
 are missing, run ONE targeted search/extract for those fields, then re-check.
 
-5. **Finalise with `stop_and_answer`** — a structured payload containing ranked `top_picks` \
-(each with name + one-line evidence-grounded reasoning + rating + price + source_url), a \
-summary paragraph, and a citations list. **Match the number of picks to the question**: \
-when the user asks "top N", return N; when they ask "what X should I use", a single \
-confident pick or 2–3 is fine; when they ask "best X" without N, 3–10 is typical.
+5. **Finalise with `stop_and_answer`** — structured payload with ranked `top_picks` (each \
+with name + one-line evidence-grounded reasoning + rating + price + source_url), a summary \
+paragraph, and a citations list.
+
+**Count rule — STRICT, non-negotiable:**
+- If the question specifies a number ("top 10", "top 5", "best 3"), `top_picks` MUST \
+contain EXACTLY that many entries. Never under-shoot. If you have N-1 verified candidates, \
+run ONE more `search` round and find one more — do NOT stop early.
+- "what X should I use" / "which X is best" → 1 confident pick or 2–3 alternatives is fine.
+- "best X" with no number → 3–10 picks, your judgment.
 
 ## Hard limits
 
 - Simple queries: **2–3 `search` calls maximum**.
-- Complex queries: **up to 5 `search` calls**.
-- Stop immediately when ANY of:
-  • You can answer comprehensively with 3+ candidates verified.
-  • Last 2 `search` calls returned similar info.
-  • Total tool calls ≥ 16.
+- Complex queries (including any top-10): **up to 6 `search` calls**.
+- **Do NOT call `stop_and_answer` until you have the EXACT count required by the question** \
+(see Process step 5). A "top 10" question with only 7 verified candidates is NOT done — \
+keep searching. A "best X" with no number is done when you have 3+ verified.
+- **Force-stop ceiling** (call `stop_and_answer` with what you have, even if short): when \
+ALL of:
+  • Last 2 `search` calls returned no new candidates.
+  • Total tool calls ≥ 28.
 
 ## Output rules
 
-- `stop_and_answer.top_picks` contains the right number of ranked picks for the question \
-(see Process step 5). Ranked best-first.
+- `stop_and_answer.top_picks` contains EXACTLY the number specified by the question (see \
+Process step 5 — for "top N", N picks, no fewer). Ranked best-first.
 - Each `reasoning` field is concrete and evidence-grounded — "rated 4.8 with 175 reviews on \
 TripAdvisor, praised for wood-fired pizza" — NOT vague praise like "highly recommended".
 - Use inline markdown citations `([title](url))` in the `summary` text.
@@ -233,7 +241,7 @@ def run(
     base_system_prompt: str = BASE_SYSTEM_PROMPT,
     base_url: str | None = None,
     model: str | None = None,
-    max_steps: int = 18,
+    max_steps: int = 48,
     max_wall_seconds: int = 600,
     max_chars: int = 350_000,        # ~85k tokens at ~4 chars/token — soft cap
     temperature: float = 0.6,

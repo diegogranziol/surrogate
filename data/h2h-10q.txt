@@ -1,0 +1,17 @@
+# Head-to-head 10-question benchmark — 5 structured + 5 natural.
+# Run: .venv/bin/python run_head_to_head.py data/h2h-10q.txt
+# Includes 5 Avea-relevant supplement questions (Swiss brands, spermidine x2, NMN, collagen).
+
+# --- Structured (top-N specified) ---
+What are the top 10 phones to buy in 2026?
+What are the top 10 best-rated Italian restaurants in Tashkent?
+What are the top 10 noise-cancelling headphones in 2026?
+What are the top 10 Swiss supplement brands?
+What are the top 10 spermidine supplement brands for healthy aging?
+
+# --- Natural (no top-N) ---
+What's the best NMN supplement brand for healthy aging?
+What's the best espresso machine for a home barista?
+What's the best Italian restaurant in Tashkent?
+What's the best collagen supplement for skin and joint health?
+Which spermidine supplement is best for longevity?

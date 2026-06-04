@@ -148,6 +148,17 @@ NO MATCH if:
 - Different brand / different line / different venue
     "Burj Al Arab Jumeirah" <-> "Mandarin Oriental Jumeirah"
     "Nike Vaporfly" <-> "Saucony Endorphin"
+- **Same product TYPE or CATEGORY but different brand** — this is NEVER a match.
+  Two distinct brands selling the same kind of supplement / phone / shoe are
+  DIFFERENT products and must NOT be matched. Forbidden reasons include "same
+  product type", "same product category", "both are NMN supplements", "both
+  are spermidine brands". A category overlap is not an identity match.
+    "Zein Pharma Spermidine" <-> "Toniiq Spermidine"   (different brands)
+    "Tru Niagen NMN"          <-> "ProHealth NMN"      (different brands)
+    "Nike Pegasus 41"         <-> "Asics Gel-Cumulus"  (different brands)
+
+The match must be about IDENTITY (same brand + same product line, possibly
+different version/tier). Same-category-different-brand is a NO MATCH, full stop.
 
 Compare each item in list A to EVERY item in list B. An item in A counts as
 matched if it matches ANY item in B.

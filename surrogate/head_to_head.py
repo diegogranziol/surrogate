@@ -26,6 +26,7 @@ from pathlib import Path
 from surrogate.loop import run as loop_run
 from surrogate.loop_tools import default_tools
 from surrogate.frontier_claude import ask_claude
+from surrogate.frontier_openai import ask_openai
 from surrogate.reference import ask_reference
 from surrogate.backtest import (
     _extract_client,
@@ -33,6 +34,15 @@ from surrogate.backtest import (
     _concat_thinking,
     _SOFT_MATCH_SYSTEM,
 )
+
+
+# Registry of frontier comparators. The harness picks one via the `frontier`
+# argument to run_one_h2h(). Both functions take (question, mode=...) and
+# return the same dict shape (see frontier_claude.ask_claude docstring).
+FRONTIERS = {
+    "claude": ask_claude,
+    "openai": ask_openai,
+}
 
 STORE_DIR = Path("backtests")
 H2H_JSONL = STORE_DIR / "h2h-store.jsonl"
@@ -149,6 +159,7 @@ def run_one_h2h(
     *,
     k: int | None = None,
     mode: str | None = None,
+    frontier: str = "claude",
     log_root: str = "logs",
 ) -> dict:
     """Run the head-to-head for ONE question. Returns a fully-loaded entry
@@ -156,12 +167,19 @@ def run_one_h2h(
 
     If k or mode are None, infers them from the question wording via
     `infer_question_shape`.
+
+    `frontier` selects which comparator to use ("claude" or "openai" — see
+    FRONTIERS registry).
     """
     inferred_k, inferred_mode = infer_question_shape(question)
     if k is None:
         k = inferred_k
     if mode is None:
         mode = inferred_mode
+
+    if frontier not in FRONTIERS:
+        raise ValueError(f"Unknown frontier {frontier!r}. Options: {list(FRONTIERS)}")
+    ask_frontier = FRONTIERS[frontier]
 
     t0 = time.time()
 
@@ -170,8 +188,8 @@ def run_one_h2h(
     sur_answer = sur.final_answer or ""
     sur_pick = extract_pick_topN(sur_answer, k=k)
 
-    # 2. claude (own server-side web_search + extended thinking)
-    fr = ask_claude(question, mode=mode)
+    # 2. frontier (own server-side web_search + extended thinking/reasoning)
+    fr = ask_frontier(question, mode=mode)
     fr_pick = extract_pick_topN(fr["answer"], k=k)
 
     # 3. soft-match
@@ -184,6 +202,7 @@ def run_one_h2h(
         "question": question,
         "k": k,
         "mode": mode,
+        "frontier": frontier,
         "surrogate": {
             "model": os.environ.get("STAGE2_MODEL", "qwen3-8b"),
             "answer": sur_answer,
@@ -388,37 +407,119 @@ def render_h2h_section(e: dict) -> str:
     return "\n".join(out)
 
 
-def write_h2h_md(entries: list[dict], path: Path) -> None:
+# ---- brand-visibility analytics (used by the executive summary) ------------
+
+def _contains_brand(items: list[str], brand: str) -> str | None:
+    """Return the matching item (verbatim) if `brand` appears as a substring in
+    any of `items`, case-insensitive. None otherwise."""
+    needle = brand.lower()
+    for x in items or []:
+        if needle in str(x).lower():
+            return x
+    return None
+
+
+# Heuristic: which questions are about supplements / Avea's playing field.
+# Only used to decide whether to add the "brand visibility" subsection.
+_SUPPLEMENT_KEYWORDS = (
+    "supplement", "nmn", "nad+", "spermidine", "collagen", "longevity",
+    "healthy aging", "anti-aging", "vitamin",
+)
+
+
+def _is_brand_question(question: str) -> bool:
+    q = question.lower()
+    return any(k in q for k in _SUPPLEMENT_KEYWORDS)
+
+
+def write_h2h_md(entries: list[dict], path: Path, *, brand: str = "Avea") -> None:
+    """Write a presentable head-to-head report.
+
+    Structure:
+      1. Executive summary (mode-split overlap, per-Q table)
+      2. Brand visibility (if any supplement questions present) — for the pitch
+      3. Per-question detail (tool trace, thinking, answer, soft-match)
+    """
     out: list[str] = []
-    out.append(f"# Head-to-head — {len(entries)} questions")
+    out.append(f"# Head-to-head — Surrogate vs Claude ({len(entries)} questions)")
     out.append("")
-    if entries:
-        # Split by mode so the headline numbers stay comparable.
-        by_mode: dict[str, list[dict]] = {}
-        for e in entries:
-            by_mode.setdefault(e.get("mode", "structured"), []).append(e)
-        for mode, group in by_mode.items():
-            overlaps = [e["match"]["overlap"] for e in group]
-            ks = [len(e["match"]["a"]) or e["k"] for e in group]
-            mean_overlap = sum(overlaps) / len(overlaps)
-            mean_k = sum(ks) / len(ks)
-            out.append(
-                f"**{mode}** ({len(group)} q): mean overlap "
-                f"{mean_overlap:.2f} / {mean_k:.1f}  _(higher = closer to frontier)_"
-            )
+    out.append("_Each side answers independently using its own tools "
+               "(Surrogate: 7-tool ReAct loop + Tavily; Frontier: Claude with "
+               "built-in web_search). Comparison is on the final ranked answer "
+               "lists — top-N soft-match overlap, judged by GLM-4.6._")
+    out.append("")
+
+    if not entries:
+        out.append("_(no entries)_")
+        path.write_text("\n".join(out))
+        return
+
+    # ---- 1. Executive summary -------------------------------------------------
+    out.append("## 📊 Executive summary")
+    out.append("")
+    by_mode: dict[str, list[dict]] = {}
+    for e in entries:
+        by_mode.setdefault(e.get("mode", "structured"), []).append(e)
+    for mode, group in by_mode.items():
+        overlaps = [e["match"]["overlap"] for e in group]
+        ks = [len(e["match"]["a"]) or e["k"] for e in group]
+        mean_overlap = sum(overlaps) / len(overlaps)
+        mean_k = sum(ks) / len(ks)
+        out.append(
+            f"- **{mode}** ({len(group)} q): mean overlap "
+            f"**{mean_overlap:.2f} / {mean_k:.1f}**  "
+            f"_({mean_overlap / max(mean_k, 1):.0%} of the surrogate's picks "
+            f"matched the frontier)_"
+        )
+    out.append("")
+    out.append("**Per-question overlap:**")
+    out.append("")
+    out.append("| # | mode | k | overlap | question |")
+    out.append("|---|------|---|---------|----------|")
+    for i, e in enumerate(entries, 1):
+        mm = e["match"]
+        out.append(
+            f"| {i} | {e.get('mode','?')} | {e['k']} | "
+            f"**{mm['overlap']}/{len(mm['a'])}** | {e['question']} |"
+        )
+    out.append("")
+
+    # ---- 2. Brand visibility section -----------------------------------------
+    brand_qs = [e for e in entries if _is_brand_question(e["question"])]
+    if brand_qs:
+        out.append(f"## 🎯 {brand} visibility")
         out.append("")
-        out.append("**Per-question overlap:**")
+        out.append(
+            f"_For each supplement-relevant question, did **{brand}** appear in "
+            f"the surrogate's ranked list? In Claude's? This is the GEO signal — "
+            f"\"how does the frontier perceive my brand right now\"._"
+        )
         out.append("")
-        out.append("| # | mode | k | overlap | question |")
-        out.append("|---|------|---|---------|----------|")
-        for i, e in enumerate(entries, 1):
-            mm = e["match"]
-            out.append(
-                f"| {i} | {e.get('mode','?')} | {e['k']} | "
-                f"{mm['overlap']}/{len(mm['a'])} | {e['question']} |"
-            )
+        out.append("| # | Question | In Surrogate | In Claude | Verdict |")
+        out.append("|---|----------|--------------|-----------|---------|")
+        for i, e in enumerate(brand_qs, 1):
+            s_hit = _contains_brand(e["surrogate"]["ranked"], brand)
+            f_hit = _contains_brand(e["frontier"]["ranked"], brand)
+            s_cell = f"✅ `{s_hit}`" if s_hit else "❌ —"
+            f_cell = f"✅ `{f_hit}`" if f_hit else "❌ —"
+            if s_hit and f_hit:
+                verdict = "🟢 Both — credible proxy + good GEO"
+            elif f_hit and not s_hit:
+                verdict = "🟡 Frontier yes, surrogate no — tool/search gap"
+            elif s_hit and not f_hit:
+                verdict = "🟠 Surrogate yes, frontier no — invisible to AI mainstream"
+            else:
+                verdict = "🔴 Neither — invisible to both → GEO opportunity"
+            out.append(f"| {i} | {e['question']} | {s_cell} | {f_cell} | {verdict} |")
         out.append("")
+
+    # ---- 3. Per-question detail ----------------------------------------------
     out.append("---")
+    out.append("")
+    out.append("## 📋 Per-question detail")
+    out.append("")
+    out.append("_(Each section: side-by-side picks, full surrogate tool trace, "
+               "thinking blocks, final answers from both sides, soft-match judgment.)_")
     out.append("")
     for e in entries:
         out.append(render_h2h_section(e))

@@ -1,19 +1,9 @@
 # Top-10 set — explicit "top N" framing so both sides produce comparably-sized lists.
 # Harness auto-detects k from the "top N" wording; mode = structured.
-# Mix of categories so we don't overfit to one shape.
+# Includes 2 Avea-relevant supplement questions (#4, #5).
 
 What are the top 10 phones to buy in 2026?
-What are the top 10 running shoes for marathons in 2026?
 What are the top 10 best-rated Italian restaurants in Tashkent?
-What are the top 10 skincare products for adult acne?
 What are the top 10 noise-cancelling headphones in 2026?
-What are the top 10 best electric vehicles in 2026?
-What are the top 5 whey protein brands for muscle gain in 2026?
-What are the top 10 espresso machines for home use?
-What are the top 10 standing desks under $500?
-What are the top 5 mechanical keyboards for programmers in 2026?
-What are the top 10 best smartwatches in 2026?
-What are the top 10 hotels in Dubai for a luxury stay?
-What are the top 5 SUVs to buy in 2026?
-What are the top 10 budget laptops for students in 2026?
-What are the top 5 best wireless earbuds in 2026?
+What are the top 10 Swiss supplement brands?
+What are the top 10 spermidine supplement brands for healthy aging?

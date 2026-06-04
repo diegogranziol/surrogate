@@ -41,6 +41,12 @@ def main() -> int:
               "the question; 'structured' forces numbered-list mode; 'natural' "
               "lets the frontier answer freely."),
     )
+    ap.add_argument(
+        "--frontier", choices=["claude", "openai"], default="claude",
+        help=("Which frontier model to compare against. 'claude' = Anthropic "
+              "Claude + web_search tool. 'openai' = OpenAI gpt-5 (or "
+              "FRONTIER_OPENAI_MODEL) via Responses API + web_search."),
+    )
     args = ap.parse_args()
 
     qs = [
@@ -61,10 +67,11 @@ def main() -> int:
 
     entries: list[dict] = []
     forced_mode = None if args.mode == "auto" else args.mode
+    print(f"\nFrontier: {args.frontier}\n", flush=True)
     for i, q in enumerate(qs, 1):
         print(f"\n[{i}/{len(qs)}] {q}", flush=True)
         try:
-            e = run_one_h2h(q, k=args.k, mode=forced_mode)
+            e = run_one_h2h(q, k=args.k, mode=forced_mode, frontier=args.frontier)
             append_h2h(e)
             entries.append(e)
             m = e["match"]
