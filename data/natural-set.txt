@@ -1,0 +1,9 @@
+# Natural set — how people actually ask. No "top N" in the wording.
+# Harness defaults to k=5, mode=natural; the frontier answers freely.
+# Includes 3 Avea-relevant supplement questions (#1, #4, #5).
+
+What's the best NMN supplement brand for healthy aging?
+What's the best espresso machine for a home barista?
+What's the best Italian restaurant in Tashkent?
+What's the best collagen supplement for skin and joint health?
+Which spermidine supplement is best for longevity?

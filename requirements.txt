@@ -1,7 +1,9 @@
 openai>=1.50.0
 anthropic>=0.40.0
+json5>=0.9.25
 ddgs>=9.0.0
 trafilatura>=2.0.0
+extruct>=0.18.0
 beautifulsoup4>=4.12.0
 lxml>=5.0.0
 curl_cffi>=0.7.0

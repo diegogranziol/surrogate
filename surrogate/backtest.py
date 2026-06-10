@@ -37,13 +37,10 @@ from pathlib import Path
 
 from openai import OpenAI
 
-from surrogate.two_stage import (
-    run_two_stage,
-    _extract_tool_outputs,
-    _build_stage2_user_message,
-    STAGE2_SYSTEM,
-)
+from surrogate.two_stage import STAGE2_SYSTEM  # reused as reference's strict prompt
 from surrogate.reference import ask_reference, REFERENCE_MODEL
+from surrogate.loop import run as loop_run
+from surrogate.loop_tools import default_tools
 
 STORE_DIR = Path("backtests")
 STORE_JSONL = STORE_DIR / "store.jsonl"
@@ -151,6 +148,17 @@ NO MATCH if:
 - Different brand / different line / different venue
     "Burj Al Arab Jumeirah" <-> "Mandarin Oriental Jumeirah"
     "Nike Vaporfly" <-> "Saucony Endorphin"
+- **Same product TYPE or CATEGORY but different brand** — this is NEVER a match.
+  Two distinct brands selling the same kind of supplement / phone / shoe are
+  DIFFERENT products and must NOT be matched. Forbidden reasons include "same
+  product type", "same product category", "both are NMN supplements", "both
+  are spermidine brands". A category overlap is not an identity match.
+    "Zein Pharma Spermidine" <-> "Toniiq Spermidine"   (different brands)
+    "Tru Niagen NMN"          <-> "ProHealth NMN"      (different brands)
+    "Nike Pegasus 41"         <-> "Asics Gel-Cumulus"  (different brands)
+
+The match must be about IDENTITY (same brand + same product line, possibly
+different version/tier). Same-category-different-brand is a NO MATCH, full stop.
 
 Compare each item in list A to EVERY item in list B. An item in A counts as
 matched if it matches ANY item in B.
@@ -200,20 +208,115 @@ def soft_match_top3(a_list: list[str], b_list: list[str]) -> dict:
                 "judge_raw": f"[judge error: {e!r}]", "_ok": False, "_fallback": True}
 
 
+# ---- evidence-pack reconstruction from the new loop's trace ----------------
+# The new ReAct loop is single-stage: tool calls and observations are scattered
+# through one trajectory. To keep apples-to-apples with the reference, we
+# walk the bundle's trace.jsonl, pair each tool_call with its tool_result,
+# and format them into the same Stage-2-style EVIDENCE block we used before.
+
+# Tools that don't carry external evidence — exclude from the reference's
+# evidence pack so we're only comparing what was actually fetched from the
+# world, not the agent's internal scaffolding.
+_NON_EVIDENCE_TOOLS = {"stop_and_answer", "think", "check_missing_fields"}
+
+
+def _evidence_pack_from_bundle(question: str, bundle_dir) -> str:
+    """Reconstruct a Stage-2-style EVIDENCE block from the loop's trace."""
+    trace = Path(bundle_dir) / "trace.jsonl"
+    if not trace.exists():
+        return f"QUESTION: {question}\n\nEVIDENCE: (no trace.jsonl found)"
+
+    events = [json.loads(l) for l in trace.read_text().splitlines() if l.strip()]
+    pairs: dict[int, dict] = {}
+    for e in events:
+        step = e.get("step")
+        if step is None:
+            continue
+        if e["kind"] == "tool_call":
+            pairs.setdefault(step, {})["call"] = e
+        elif e["kind"] in ("tool_result", "tool_error"):
+            pairs.setdefault(step, {})["result"] = e
+
+    parts = [f"QUESTION: {question}", "", "EVIDENCE GATHERED FROM TOOL CALLS:"]
+    has_any = False
+    for step in sorted(pairs):
+        p = pairs[step]
+        call = p.get("call")
+        if not call:
+            continue
+        if call.get("name") in _NON_EVIDENCE_TOOLS:
+            continue
+        result = p.get("result", {})
+        body = str(result.get("result") or result.get("error") or "(no result)")
+        parts.append("")
+        parts.append(
+            f"---- Source (step {step}): "
+            f"{call['name']}({json.dumps(call.get('args', {}), ensure_ascii=False)}) ----"
+        )
+        parts.append(body)
+        has_any = True
+
+    if not has_any:
+        return (
+            f"QUESTION: {question}\n\n"
+            "EVIDENCE: (no external tools were called; nothing to review)\n\n"
+            "Answer the question and say clearly that no web evidence was available."
+        )
+    parts.append("")
+    parts.append(
+        "Now, using ONLY the evidence above, think step by step and provide your "
+        "best answer to the QUESTION. Cite specific source URLs."
+    )
+    return "\n".join(parts)
+
+
+def _concat_thinking(messages: list[dict]) -> str:
+    """Pull every <think>...</think> block out of assistant messages and
+    concatenate them — for storage in the entry's `thinking` field."""
+    parts: list[str] = []
+    for m in messages:
+        if m.get("role") != "assistant":
+            continue
+        content = m.get("content", "") or ""
+        for match in re.finditer(r"<think>\s*(.*?)\s*</think>", content, re.DOTALL):
+            parts.append(match.group(1).strip())
+    return "\n\n---\n\n".join(parts)
+
+
+def _count_evidence_tool_calls(bundle_dir) -> int:
+    """Count tool_call events that are not scaffolding (think / stop / check)."""
+    trace = Path(bundle_dir) / "trace.jsonl"
+    if not trace.exists():
+        return 0
+    n = 0
+    for line in trace.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            e = json.loads(line)
+        except Exception:
+            continue
+        if e.get("kind") == "tool_call" and e.get("name") not in _NON_EVIDENCE_TOOLS:
+            n += 1
+    return n
+
+
 # ---- one question end-to-end ----------------------------------------------
 
 def run_one(question: str, *, log_root: str = "logs") -> dict:
     t0 = time.time()
-    res = run_two_stage(question, log_root=log_root)
+    # New: single-stage ReAct loop with the 7-tool engineered workflow.
+    res = loop_run(question, tools=default_tools(), log_root=log_root)
 
-    tool_pairs = _extract_tool_outputs(res.stage1.log_dir)
-    # The EXACT text stage 2 saw — feed this verbatim to the reference.
-    stage2_user = _build_stage2_user_message(question, tool_pairs)
+    # Reconstruct apples-to-apples evidence pack from the loop's trace and
+    # feed it verbatim to the reference (same fairness contract as before).
+    stage2_user = _evidence_pack_from_bundle(question, res.bundle_dir)
 
     ref_ev = ask_reference(question=stage2_user, system=STAGE2_SYSTEM)
     ref_bare = ask_reference(question=question)
 
-    sur_pick = extract_pick(res.stage2.answer)
+    sur_answer = res.final_answer or ""
+    sur_pick = extract_pick(sur_answer)
     refev_pick = extract_pick(ref_ev["answer"])
     refbare_pick = extract_pick(ref_bare["answer"])
 
@@ -222,12 +325,14 @@ def run_one(question: str, *, log_root: str = "logs") -> dict:
         "capture_date": date.today().isoformat(),
         "timestamp": datetime.now().isoformat(timespec="seconds"),
         "bundle_dir": str(res.bundle_dir),
+        "termination": res.termination,
         "surrogate": {
-            "model": res.stage2.model,
-            "answer": res.stage2.answer,
-            "thinking": res.stage2.reasoning,
+            "model": os.environ.get("STAGE2_MODEL", "qwen3-8b"),
+            "answer": sur_answer,
+            "thinking": _concat_thinking(res.messages),
             "pick": sur_pick,
-            "n_tool_calls": len(tool_pairs),
+            "n_tool_calls": _count_evidence_tool_calls(res.bundle_dir),
+            "steps": res.steps,
         },
         "reference_evidence": {
             "model": REFERENCE_MODEL,
@@ -246,7 +351,7 @@ def run_one(question: str, *, log_root: str = "logs") -> dict:
         },
         "duration_s": round(time.time() - t0, 1),
     }
-    # Top-3 soft-match scoring (the agreed metric).
+    # Top-3 soft-match scoring (the agreed metric, unchanged).
     entry["top3"] = {
         "_metric": "top-3 soft-match overlap (decided 2026-05-20; NDCG parked)",
         "surrogate_vs_reference_evidence": soft_match_top3(

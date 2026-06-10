@@ -1,0 +1,9 @@
+# Top-10 set — explicit "top N" framing so both sides produce comparably-sized lists.
+# Harness auto-detects k from the "top N" wording; mode = structured.
+# Includes 2 Avea-relevant supplement questions (#4, #5).
+
+What are the top 10 phones to buy in 2026?
+What are the top 10 best-rated Italian restaurants in Tashkent?
+What are the top 10 noise-cancelling headphones in 2026?
+What are the top 10 Swiss supplement brands?
+What are the top 10 spermidine supplement brands for healthy aging?

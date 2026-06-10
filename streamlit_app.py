@@ -1,9 +1,17 @@
-"""Tiny Streamlit UI for the user-RAG + surrogate.
+"""Streamlit UI for the surrogate deep-research agent.
 
-Three things only — paste URLs/text to ingest, list/delete docs, ask a question.
-Questions can be answered RAG-only (just retrieved chunks, no model run) or
-through the full surrogate two-stage pipeline with RAG evidence appended to
-Stage 2.
+Tabs:
+  • Ingest / Documents — manage a local user-RAG store (sentence-transformers
+    over SQLite). Not used by the deep-research agent below; kept available
+    for retrieve-only queries and future composition.
+  • Ask — ask a question. Two modes:
+      - Retrieve only: cosine search over the user-RAG store (no model call).
+      - Surrogate: single-stage ReAct loop, 7 tools (search, fetch_url,
+        extract_entity, verify_fact, check_missing_fields, think,
+        stop_and_answer). Visible <think> reasoning between tool calls.
+        Optional side-by-side comparison vs GLM-4.6 on the SAME evidence.
+  • Compare two URLs — DOM-pair flow (Stage 2 bypassed).
+  • Settings — box/tunnel/reference-model config.
 
 Run:
     streamlit run streamlit_app.py
@@ -21,14 +29,16 @@ from surrogate.rag import (
     delete_doc, ingest_text, ingest_url, list_docs, retrieve,
 )
 
-st.set_page_config(page_title="Surrogate + User-RAG", layout="wide")
+st.set_page_config(page_title="Surrogate · Deep-Research Agent", layout="wide")
 st.title(
-    "Surrogate + User-RAG",
+    "Surrogate · Deep-Research Agent",
     help=(
-        "Bring your own web links into the surrogate's evidence. Stage 1's "
-        "web search still runs; user chunks are appended to Stage 2's "
-        "evidence pack so the answer is grounded in BOTH the live web and "
-        "your own sources."
+        "Open-source surrogate of a frontier deep-research assistant. Single "
+        "ReAct loop on Qwen3-8B with 7 tools (search, fetch_url, "
+        "extract_entity, verify_fact, check_missing_fields, think, "
+        "stop_and_answer). Visible <think> reasoning between every tool call. "
+        "Compare side-by-side against GLM-4.6 on the same evidence to "
+        "measure reasoning fidelity."
     ),
 )
 
@@ -101,18 +111,24 @@ with tab_ask:
     )
     mode = st.radio(
         "Mode",
-        ["Retrieve only (no model call)",
-         "Surrogate + RAG (full two-stage, hits remote GPU via tunnel)"],
+        [
+            "Retrieve only — search ingested docs (no model call)",
+            "Surrogate — deep-research agent (7-tool ReAct loop)",
+        ],
         horizontal=False,
     )
-    k = st.slider("Top-k retrieved chunks", 1, 10, 5)
+    k = st.slider(
+        "Top-k retrieved chunks (Retrieve-only mode)", 1, 10, 5,
+        help="Only used in 'Retrieve only' mode — number of chunks from the user-RAG store.",
+    )
     compare_glm = st.checkbox(
         "Also call GLM reference (same evidence, side-by-side)",
         value=False,
         help=(
-            "After the surrogate runs, send the SAME evidence pack to the "
-            "GLM reference (z.ai) and show both answers side-by-side. The "
-            "fair fidelity comparison without running a full backtest."
+            "After the surrogate runs, send the SAME evidence pack the "
+            "surrogate gathered (tool outputs from `search`, `fetch_url`, "
+            "`extract_entity`) to the GLM reference (z.ai) and show both "
+            "answers side-by-side. Apples-to-apples fidelity comparison."
         ),
     )
 
@@ -129,76 +145,63 @@ with tab_ask:
                     ):
                         st.text(h["text"])
         else:
-            # Full surrogate run (requires the vLLM endpoint / SSH tunnel up).
+            # New single-stage ReAct loop with the 7-tool engineered workflow.
             try:
-                from surrogate.two_stage import run_two_stage
+                from surrogate.loop import run as loop_run
+                from surrogate.loop_tools import default_tools
+                from surrogate.backtest import (
+                    _evidence_pack_from_bundle, _concat_thinking,
+                )
             except Exception as e:
-                st.error(f"could not import two_stage: {e!r}")
+                st.error(f"could not import loop modules: {e!r}")
                 st.stop()
             st.info(
-                "Running Stage 1 (tools) + Stage 2 (reasoning with RAG-augmented "
-                "evidence). Needs the vLLM endpoint at localhost:8000 to be up "
-                "(keep_tunnel.sh)."
+                "Running the deep-research agent: a single ReAct loop with "
+                "`search` → `fetch_url`/`extract_entity` → `verify_fact` → "
+                "`check_missing_fields` → `think` → `stop_and_answer`. "
+                "Needs the vLLM endpoint at localhost:8000 (keep_tunnel.sh)."
             )
             # --- 1. try the surrogate run; capture (not raise) any failure ---
             res = None
             surrogate_error = None
             surrogate_tb = None
             try:
-                with st.spinner("Running surrogate two-stage ..."):
-                    res = run_two_stage(q, use_rag=True, rag_k=k)
+                with st.spinner("Running surrogate agent (may take 1–3 min)…"):
+                    res = loop_run(q, tools=default_tools())
             except Exception as e:
                 surrogate_error = e
                 surrogate_tb = traceback.format_exc()
 
             if res is not None:
-                st.success(f"Done — bundle: {res.bundle_dir}")
+                st.success(
+                    f"Done — termination={res.termination}, "
+                    f"steps={res.steps}, bundle: {res.bundle_dir}"
+                )
 
-            # --- 2. if requested, call GLM regardless of surrogate outcome ---
+            # --- 2. if requested, call GLM with the surrogate's evidence ---
             ref = None
             ref_error = None
             ref_used_full_evidence = False
             if compare_glm:
-                from surrogate.two_stage import (
-                    _extract_tool_outputs,
-                    _build_stage2_user_message,
-                    STAGE2_SYSTEM,
-                )
                 from surrogate.reference import ask_reference
-                try:
-                    from surrogate.rag import build_rag_evidence_block
-                    rag_block, _ = build_rag_evidence_block(q, k=k)
-                except Exception:
-                    rag_block = ""
+                from surrogate.two_stage import STAGE2_SYSTEM
 
                 if res is not None:
-                    # SURROGATE OK -> apples-to-apples: same evidence, strict
-                    # "use only the evidence below" system prompt.
-                    tool_pairs = _extract_tool_outputs(res.stage1.log_dir)
+                    # SURROGATE OK -> apples-to-apples: reconstruct the
+                    # evidence pack from the loop's trace and feed it to GLM
+                    # with the strict "use only this evidence" system prompt.
+                    stage2_user = _evidence_pack_from_bundle(q, res.bundle_dir)
                     ref_used_full_evidence = True
-                    stage2_user = _build_stage2_user_message(
-                        q, tool_pairs, extra_evidence=rag_block
-                    )
                     ref_sys = STAGE2_SYSTEM
                     ref_spinner = "Calling GLM reference (same evidence)…"
                 else:
-                    # SURROGATE FAILED -> there is no web evidence. Using
-                    # STAGE2_SYSTEM here would tell the model "use ONLY the
-                    # evidence" and then provide none, so it'd refuse. Instead
-                    # let GLM answer from its memory (+ user RAG if any) — same
-                    # as the backtest's "bare" reference path.
-                    bare_q = q
-                    if rag_block.strip():
-                        bare_q = (
-                            f"{q}\n\nUser-provided context (may be relevant):\n"
-                            f"{rag_block}"
-                        )
-                    stage2_user = bare_q
+                    # SURROGATE FAILED -> let GLM answer from memory alone
+                    # (no system prompt that mandates evidence-only, since
+                    # there is none — would force a refusal otherwise).
+                    stage2_user = q
                     ref_sys = None
-                    ref_spinner = (
-                        "Calling GLM in bare mode (no surrogate evidence; "
-                        "GLM will answer from memory + your RAG)…"
-                    )
+                    ref_spinner = ("Calling GLM in bare mode (no surrogate "
+                                   "evidence; GLM answers from memory)…")
 
                 with st.spinner(ref_spinner):
                     try:
@@ -225,15 +228,17 @@ with tab_ask:
                 with st.expander("debug detail"):
                     st.text(surrogate_tb or "(no traceback)")
 
+            surrogate_model = os.environ.get("STAGE2_MODEL", "qwen3-8b")
             if compare_glm:
                 col_s, col_r = st.columns(2)
                 with col_s:
                     if res is not None:
-                        st.subheader(f"Surrogate · {res.stage2.model}")
-                        st.write(res.stage2.answer or "(empty)")
-                        if res.stage2.reasoning:
-                            with st.expander("thinking (verbatim)"):
-                                st.text(res.stage2.reasoning)
+                        st.subheader(f"Surrogate · {surrogate_model}")
+                        st.write(res.final_answer or "(empty)")
+                        thinking = _concat_thinking(res.messages)
+                        if thinking:
+                            with st.expander("thinking (all <think> blocks, verbatim)"):
+                                st.text(thinking)
                     else:
                         st.subheader("Surrogate · not run")
                         _show_friendly_surrogate_error()
@@ -246,24 +251,20 @@ with tab_ask:
                     else:
                         title = f"Reference · {ref['model']}"
                         if not ref_used_full_evidence:
-                            title += "  (no web evidence — surrogate not run)"
+                            title += "  (no surrogate evidence — bare GLM)"
                         st.subheader(title)
                         st.write(ref["answer"] or "(empty)")
                         if ref.get("thinking"):
                             with st.expander("thinking (verbatim)"):
                                 st.text(ref["thinking"])
-                if res is not None:
-                    with st.expander("Stage 1 answer (surrogate's agent, for reference)"):
-                        st.write(res.stage1.answer or "(empty)")
             else:
                 if res is not None:
-                    st.subheader("Stage 2 answer")
-                    st.write(res.stage2.answer or "(empty)")
-                    if res.stage2.reasoning:
-                        with st.expander("Stage 2 thinking (verbatim)"):
-                            st.text(res.stage2.reasoning)
-                    with st.expander("Stage 1 answer (for reference)"):
-                        st.write(res.stage1.answer or "(empty)")
+                    st.subheader(f"Surrogate answer · {surrogate_model}")
+                    st.write(res.final_answer or "(empty)")
+                    thinking = _concat_thinking(res.messages)
+                    if thinking:
+                        with st.expander("thinking (all <think> blocks, verbatim)"):
+                            st.text(thinking)
                 else:
                     _show_friendly_surrogate_error()
 
