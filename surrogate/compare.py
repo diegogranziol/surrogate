@@ -212,6 +212,122 @@ def _grounded_why(base_why: str, openai_urls: list[str], claude_urls: list[str])
     return " ".join(bits)
 
 
+# ---- deeper suggestions (LLM-generated, rubric-driven) -----------------------
+# The rubric below is the curated list of "action-questions" the analyst model
+# must answer internally before writing its output. Edit these to steer what
+# the deeper analysis looks for — the model only presents conclusions, but
+# these questions decide what it investigates.
+
+DEEP_ACTION_QUESTIONS = [
+    "Which brands appear in MORE THAN ONE system's list, and what shared, "
+    "publicly-visible assets (certifications, review-site coverage, clinical "
+    "studies, retail presence, press) most plausibly put them there?",
+    "What do the top-3 ranked brands have that {brand} does not — "
+    "specifically assets an AI search pipeline can see: structured product "
+    "data, third-party test results, authority-site citations, "
+    "research-backed claims?",
+    "Of all candidate actions, which ordering maximises impact? What should "
+    "be done first, what in 1-3 months, what is longer-term — justified by "
+    "effort vs reach (one ConsumerLab review reaches many queries; one blog "
+    "mention reaches one).",
+    "Pick the 2-3 most threatening rival brands across these lists. For "
+    "each: why do AI systems rank them, what does their visible web "
+    "footprint look like, and what single move would let {brand} compete "
+    "with them most directly?",
+]
+
+DEEP_SYSTEM = """You are a GEO (generative-engine optimisation) analyst.
+You receive the real output of a 3-way AI brand-visibility test: the ranked
+recommendation lists produced independently by an open surrogate model,
+ChatGPT, and Claude for one purchase-intent question, plus the web domains
+the two frontier systems actually consulted, and brand-match results.
+
+Before writing anything, work through the analyst rubric questions you are
+given. Ground every claim in the supplied lists and domains, plus widely
+verifiable market knowledge. Never invent URLs, certifications a brand does
+not plausibly hold, or rankings not present in the data.
+
+Return ONLY compact JSON, no prose around it, exactly this shape:
+{
+ "summary": "<2-3 sentence executive read of the competitive picture>",
+ "competitive_gaps": [
+   {"asset": "<asset winning brands have>",
+    "brands_with_it": ["<brand>", ...],
+    "why_it_matters": "<why this asset wins AI visibility>",
+    "gap_for_brand": "<what the tracked brand is missing concretely>"}
+ ],
+ "priority_plan": [
+   {"rank": 1, "action": "<specific action>", "horizon": "now|1-3 months|3-6 months",
+    "effort": "low|medium|high", "impact": "<expected reach, concrete>"}
+ ],
+ "rival_deep_dive": [
+   {"brand": "<rival>",
+    "why_ai_ranks_them": "<grounded reason>",
+    "their_visible_assets": "<what their web footprint shows>",
+    "how_to_compete": "<single most direct move>"}
+ ]
+}
+3-5 competitive_gaps, 4-6 priority_plan steps, 2-3 rival_deep_dive entries."""
+
+
+def deep_suggestions(
+    question: str,
+    brand: str,
+    systems: dict,
+    matches: dict,
+    brief: dict,
+) -> dict | None:
+    """Rubric-driven deeper analysis via Claude Sonnet. Returns the parsed
+    JSON dict, or None on any failure (the UI simply skips the section)."""
+    import os
+    from anthropic import Anthropic
+
+    o_doms = sorted({_domain_of(u) for u in systems["openai"].get("urls") or []} - {""})
+    c_doms = sorted({_domain_of(u) for u in systems["claude"].get("urls") or []} - {""})
+
+    rubric = "\n".join(
+        f"{i}. {q.format(brand=brand)}" for i, q in enumerate(DEEP_ACTION_QUESTIONS, 1)
+    )
+    payload = {
+        "question": question,
+        "tracked_brand": brand,
+        "ranked_lists": {
+            "surrogate": systems["surrogate"]["ranked"],
+            "chatgpt": systems["openai"]["ranked"],
+            "claude": systems["claude"]["ranked"],
+        },
+        "brand_matches": {
+            "surrogate_vs_chatgpt": matches["sur_openai"].get("matched_pairs"),
+            "surrogate_vs_claude": matches["sur_claude"].get("matched_pairs"),
+        },
+        "domains_chatgpt_cited": o_doms,
+        "domains_claude_consulted": c_doms,
+        "brief_suggestions_already_shown": brief,
+    }
+    user = (
+        f"ANALYST RUBRIC — answer these internally first:\n{rubric}\n\n"
+        f"RUN DATA:\n{json.dumps(payload, ensure_ascii=False, indent=1)}"
+    )
+    try:
+        client = Anthropic(max_retries=3)
+        model = os.environ.get("DEEP_ADVICE_MODEL", "claude-sonnet-4-6")
+        resp = client.messages.create(
+            model=model,
+            max_tokens=8000,
+            system=DEEP_SYSTEM,
+            messages=[{"role": "user", "content": user}],
+        )
+        text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+        m = re.search(r"\{.*\}", text, re.S)
+        if not m:
+            return None
+        out = json.loads(m.group(0))
+        out["_model"] = resp.model
+        return out
+    except Exception:
+        return None
+
+
 # ---- the 3-way run ----------------------------------------------------------
 
 def compare_run(
@@ -335,6 +451,12 @@ def compare_run(
         results["openai"].get("urls") or [],
         results["claude"].get("urls") or [],
     )
+    brief = {"hits": hits, "why": why, "actions": actions}
+
+    # ---- deeper analysis (rubric-driven, Claude Sonnet) -----------------------
+    _notify("deep", "running")
+    deep = deep_suggestions(question, brand, results, matches, brief)
+    _notify("deep", "done" if deep else "error: analysis unavailable")
 
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -344,7 +466,8 @@ def compare_run(
         "brand": brand,
         "systems": results,
         "matches": matches,
-        "suggestions": {"hits": hits, "why": why, "actions": actions},
+        "suggestions": brief,
+        "deep": deep,
         "errors": errors,
     }
 

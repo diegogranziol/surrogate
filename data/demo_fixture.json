@@ -1935,7 +1935,7 @@
         [
           "Burgerstein Vitamine",
           "Burgerstein Vitamine",
-          "exact match"
+          "Exact match"
         ]
       ],
       "a": [
@@ -1962,7 +1962,7 @@
         "Phytopharma",
         "Morga"
       ],
-      "judge_raw": "```json\n{\n  \"matched_pairs\": [\n    [\"Burgerstein Vitamine\", \"Burgerstein Vitamine\", \"exact match\"]\n  ],\n  \"overlap\": 1\n}\n```",
+      "judge_raw": "```json\n{\n  \"matched_pairs\": [\n    [\"Burgerstein Vitamine\", \"Burgerstein Vitamine\", \"Exact match\"]\n  ],\n  \"overlap\": 1\n}\n```",
       "_ok": true,
       "_fallback": false,
       "_judge": "claude:claude-haiku-4-5-20251001"
@@ -1973,7 +1973,7 @@
         [
           "Swiss Energy Vitamins",
           "Swiss Energy",
-          "Same brand, naming variation"
+          "Same brand with naming variation"
         ],
         [
           "NUTRASWISS",
@@ -2015,7 +2015,7 @@
         "BE THE CHANGE",
         "Swiss PharmaCan"
       ],
-      "judge_raw": "```json\n{\n  \"matched_pairs\": [\n    [\"Swiss Energy Vitamins\", \"Swiss Energy\", \"Same brand, naming variation\"],\n    [\"NUTRASWISS\", \"NUTRASWISS\", \"Exact match\"],\n    [\"BE THE CHANGE\", \"BE THE CHANGE\", \"Exact match\"],\n    [\"SFI Health Solutions\", \"SFI Health Solutions\", \"Exact match\"]\n  ],\n  \"overlap\": 4\n}\n```",
+      "judge_raw": "```json\n{\n  \"matched_pairs\": [\n    [\"Swiss Energy Vitamins\", \"Swiss Energy\", \"Same brand with naming variation\"],\n    [\"NUTRASWISS\", \"NUTRASWISS\", \"Exact match\"],\n    [\"BE THE CHANGE\", \"BE THE CHANGE\", \"Exact match\"],\n    [\"SFI Health Solutions\", \"SFI Health Solutions\", \"Exact match\"]\n  ],\n  \"overlap\": 4\n}\n```",
       "_ok": true,
       "_fallback": false,
       "_judge": "claude:claude-haiku-4-5-20251001"
@@ -2065,6 +2065,131 @@
       "Publish a profile of Avea's Swiss-origin story on Swissinfo, NZZ, or Handelszeitung. ChatGPT pulls from Swiss business and lifestyle press for this query.",
       "Apply for membership listings with Swiss Sport Nutrition Society and similar trade bodies — their public member directories appear in ChatGPT's source set for Swiss-brand questions."
     ]
+  },
+  "deep": {
+    "summary": "Avea is entirely absent from all three AI systems' top-10 Swiss supplement brand lists, while rivals like Burgerstein, NUTRASWISS, SFI Health Solutions, and BE THE CHANGE appear across multiple systems. The winning brands share a common profile: indexed presence on Swiss industry directories, heritage brand authority, retail distribution on platforms like Galaxus and Amazon, and citations from trade media (NutraceuticalBusinessReview, Wholefoods Magazine). Avea lacks the structured third-party visibility these brands have built across review sites, directories, and authority press — the exact signals AI retrieval pipelines weight for category-level brand lists.",
+    "competitive_gaps": [
+      {
+        "asset": "Swiss industry directory & trade body listings",
+        "brands_with_it": [
+          "Burgerstein Vitamine",
+          "NUTRASWISS",
+          "SFI Health Solutions",
+          "BE THE CHANGE"
+        ],
+        "why_it_matters": "Claude and surrogate model both drew brands directly from B2B directories (accio.com, ensun.io, surfe.com, swissmade.direct, swissbiotech.org). These structured pages give AI retrieval pipelines explicit, crawlable 'Swiss supplement brand' entity signals.",
+        "gap_for_brand": "Avea has no confirmed listing on swissmade.direct, swissbiotech.org, ensun.io, or accio.com — the exact directories Claude cited when building its Swiss brand list."
+      },
+      {
+        "asset": "Marketplace retail presence (Amazon, Galaxus, Vitalabo)",
+        "brands_with_it": [
+          "Burgerstein Vitamine",
+          "A.Vogel",
+          "kingnature",
+          "Bio-Strath"
+        ],
+        "why_it_matters": "ChatGPT cited galaxus.ch and Claude cited amazon.com and vitalabo.com. Marketplace product pages create high-authority, crawlable structured data (brand name + country of origin + category) that AI systems use to confirm brand legitimacy and categorisation.",
+        "gap_for_brand": "Avea's products are not prominently listed on Galaxus or Vitalabo with Swiss-origin structured data, preventing it from appearing in the marketplace-sourced portion of AI brand lists."
+      },
+      {
+        "asset": "Trade and authority press coverage (NutraceuticalBusinessReview, Wholefoods Magazine, Swiss business press)",
+        "brands_with_it": [
+          "Nestlé Health Science",
+          "Lonza",
+          "NUTRASWISS",
+          "SFI Health Solutions"
+        ],
+        "why_it_matters": "Claude consulted nutraceuticalbusinessreview.com and wholefoodsmagazine.com — high-domain-authority trade titles that AI systems treat as editorial validation for brand legitimacy. A single article here reaches hundreds of Swiss-supplement queries.",
+        "gap_for_brand": "Avea has no confirmed editorial coverage in nutraceuticalbusinessreview.com, wholefoodsmagazine.com, or Swiss national business press (NZZ, Handelszeitung), which are the authority sources these AI pipelines pull from."
+      },
+      {
+        "asset": "Wikipedia or encyclopedic entity page",
+        "brands_with_it": [
+          "Nestlé Health Science",
+          "Lonza",
+          "A.Vogel",
+          "Bio-Strath"
+        ],
+        "why_it_matters": "Claude explicitly consulted en.wikipedia.org. Wikipedia pages function as entity anchors for AI knowledge graphs — brands with Wikipedia entries are far more likely to be surfaced as named entities in category queries.",
+        "gap_for_brand": "Avea has no Wikipedia page establishing it as a Swiss supplement brand entity. Competitors with Wikipedia presence (Nestlé Health Science, Lonza, A.Vogel) receive strong entity-recognition boosts across all AI systems."
+      },
+      {
+        "asset": "LinkedIn company profile with Swiss HQ, industry tags, and follower base",
+        "brands_with_it": [
+          "NUTRASWISS",
+          "SFI Health Solutions",
+          "Nahrin AG",
+          "SwiLab"
+        ],
+        "why_it_matters": "Claude cited linkedin.com as a source. LinkedIn company profiles provide structured employer/brand data with explicit country, industry, and product-category tags that AI systems use for geographic brand categorisation.",
+        "gap_for_brand": "Avea's LinkedIn presence does not appear to be optimised with 'Switzerland', 'dietary supplements', and 'nutraceuticals' as primary structured tags, reducing its signal strength in AI systems that pull LinkedIn as a verification source."
+      }
+    ],
+    "priority_plan": [
+      {
+        "rank": 1,
+        "action": "Submit Avea to swissmade.direct, ensun.io, accio.com, and swissbiotech.org with complete structured profiles (brand name, HQ city, product category: dietary supplements/longevity, founding year, website). These are the exact directories Claude crawled.",
+        "horizon": "now",
+        "effort": "low",
+        "impact": "Directly targets the 4 directories Claude used to build its Swiss supplement list; expected to improve Claude (and surrogate) visibility within 1-2 crawl cycles, affecting all queries of this type."
+      },
+      {
+        "rank": 2,
+        "action": "Optimise Avea's LinkedIn company page: set Industry to 'Wellness & Fitness Services' and 'Biotechnology', add Switzerland as HQ, include keywords 'Swiss supplements', 'longevity nutrition', 'nutraceuticals' in the About section, and grow follower base above 1,000.",
+        "horizon": "now",
+        "effort": "low",
+        "impact": "LinkedIn is a live Claude source for this query; structured tag changes are indexed within days and benefit all geographic brand-list queries."
+      },
+      {
+        "rank": 3,
+        "action": "List Avea products on Galaxus.ch and Vitalabo.com with full structured product data (brand: Avea, country of origin: Switzerland, category: dietary supplements). Ensure product pages include EAN codes and Swiss regulatory compliance info.",
+        "horizon": "1-3 months",
+        "effort": "medium",
+        "impact": "ChatGPT cited galaxus.ch; Claude cited vitalabo.com. Marketplace listings create durable, high-authority brand-category association pages that benefit all 'top Swiss supplement' query variants."
+      },
+      {
+        "rank": 4,
+        "action": "Secure one editorial feature in NutraceuticalBusinessReview.com or Wholefoods Magazine covering Avea's Swiss origin, NAD+ / longevity positioning, and ingredient sourcing. Pitch as a 'Swiss science-backed longevity brand' story angle.",
+        "horizon": "1-3 months",
+        "effort": "medium",
+        "impact": "Claude consulted both domains. A single article here is crawled by all major AI systems and generates brand-category citation signals that persist across thousands of future queries."
+      },
+      {
+        "rank": 5,
+        "action": "Publish a Swiss-press profile of Avea (Swissinfo.ch, Handelszeitung, or NZZ) anchored on the brand's Swiss founding story and science credentials. Brief suggestions already identify Swiss business press as a ChatGPT source pool for this query type.",
+        "horizon": "1-3 months",
+        "effort": "medium",
+        "impact": "ChatGPT's Swiss supplement answers draw on Swiss business and lifestyle press. One Swissinfo or Handelszeitung article reachable via ChatGPT's browsing shifts brand presence in all Swiss supplement brand queries."
+      },
+      {
+        "rank": 6,
+        "action": "Create or expand Avea's Wikipedia page (or Wikidata entity) establishing it as a Swiss dietary supplement company, with verifiable citations to Swiss press coverage, company registry, and product launches.",
+        "horizon": "3-6 months",
+        "effort": "high",
+        "impact": "Wikipedia is a primary Claude entity-resolution source. A verified Wikipedia entry would create a persistent knowledge-graph anchor, compounding every other visibility action and benefiting all AI systems simultaneously."
+      }
+    ],
+    "rival_deep_dive": [
+      {
+        "brand": "Burgerstein Vitamine",
+        "why_ai_ranks_them": "The only brand to appear in both ChatGPT and surrogate lists (exact match). ChatGPT pulled burgerstein.ch directly; the brand has a 100+ year Swiss heritage, established pharmacy-channel distribution, and structured product data across German-language health retail sites. It is a canonical answer to any 'Swiss supplement brand' query.",
+        "their_visible_assets": "Dedicated .ch domain with full product catalogue, pharmacy-chain retail presence generating third-party structured data, German and French Wikipedia mentions, coverage in Swiss health press, and likely a Galaxus listing contributing to ChatGPT's galaxus.ch citation.",
+        "how_to_compete": "Avea should publish a direct 'Swiss longevity supplements vs traditional Swiss vitamins' comparison article on a high-DA health site, positioning itself as the modern science-backed alternative — this creates co-citation context that AI systems can associate with the same query cluster as Burgerstein."
+      },
+      {
+        "brand": "NUTRASWISS",
+        "why_ai_ranks_them": "Appears in both surrogate and Claude lists (exact match), and Claude visited nutraswiss.in. NUTRASWISS operates as both a B2B ingredient supplier and consumer brand, giving it presence on trade directories (accio.com, ensun.io), B2B platforms, and nutraceutical trade press — all high-signal sources for AI brand-list construction.",
+        "their_visible_assets": "Multi-domain presence (nutraswiss.in indexed by Claude), B2B supplier directory listings, trade press mentions in nutraceuticalbusinessreview.com ecosystem, and structured profiles on lead-generation platforms (aeroleads.com, surfe.com) that Claude crawled.",
+        "how_to_compete": "Avea should register on the same B2B supplier directories (accio.com, aeroleads.com equivalent) with a consumer-brand profile, and pitch a product-science story to NutraceuticalBusinessReview to generate co-indexed trade coverage alongside NUTRASWISS."
+      },
+      {
+        "brand": "A.Vogel",
+        "why_ai_ranks_them": "ChatGPT cited avogel.com directly — the brand has a dedicated, content-rich .com domain with strong SEO, international retail presence, herbalist heritage dating to 1923, clinical/herbal citations, and coverage across health authority sites globally. It is a default AI answer for European herbal supplements.",
+        "their_visible_assets": "avogel.com ranks organically for hundreds of supplement queries; brand has Wikipedia entity page, ConsumerLab-style third-party reviews, Amazon listings in multiple markets, and editorial features in mainstream health press. The domain authority alone makes it a persistent AI citation target.",
+        "how_to_compete": "Avea should invest in a science-content hub on aveva.com targeting longevity and NAD+ research queries — topic clusters where A.Vogel has no presence — to win AI citations in the adjacent 'science-backed Swiss supplements' query space rather than competing head-on in the herbal/traditional segment."
+      }
+    ],
+    "_model": "claude-sonnet-4-6"
   },
   "errors": {},
   "_fixture": true

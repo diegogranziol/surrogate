@@ -27,7 +27,7 @@ load_dotenv()
 from surrogate.head_to_head import soft_match_topN
 from surrogate.compare import (
     make_advice, brand_hit, _grounded_why,
-    claude_consulted_urls, openai_cited_urls,
+    claude_consulted_urls, openai_cited_urls, deep_suggestions,
 )
 
 QUESTION = "What are the top 10 Swiss supplement brands?"
@@ -107,6 +107,11 @@ def main() -> int:
     base_why, actions = make_advice(QUESTION, hits, {n: systems[n]["ranked"] for n in systems})
     why = base_why if any(hits.values()) else _grounded_why(
         base_why, systems["openai"]["urls"], systems["claude"]["urls"])
+    brief = {"hits": hits, "why": why, "actions": actions}
+
+    print("Generating deeper analysis (Claude Sonnet)…", flush=True)
+    deep = deep_suggestions(QUESTION, BRAND, systems, matches, brief)
+    print(f"  deep: {'ok — ' + str(len(deep.get('priority_plan', []))) + ' plan steps' if deep else 'FAILED'}")
 
     record = {
         "ts": "(test mode — canned data from real past runs)",
@@ -116,7 +121,8 @@ def main() -> int:
         "brand": BRAND,
         "systems": systems,
         "matches": matches,
-        "suggestions": {"hits": hits, "why": why, "actions": actions},
+        "suggestions": brief,
+        "deep": deep,
         "errors": {},
         "_fixture": True,
     }

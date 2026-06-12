@@ -30,20 +30,103 @@ from surrogate.rag import (
 )
 
 st.set_page_config(
-    page_title="Surrogate · Deep-Research Agent",
+    page_title="AVEA · AI Visibility",
+    page_icon="🧬",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
-st.title(
-    "Surrogate · Deep-Research Agent",
-    help=(
-        "Open-source surrogate of a frontier deep-research assistant. Single "
-        "ReAct loop on Qwen3-32B with 7 tools (search, fetch_url, "
-        "extract_entity, verify_fact, check_missing_fields, think, "
-        "stop_and_answer). Visible <think> reasoning between every tool call. "
-        "Compare mode runs the same question through ChatGPT and Claude in "
-        "parallel and scores brand-level overlap."
-    ),
+
+# ---- Avea-life brand layer (palette + type pulled from avea-life.com) -------
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Epilogue:wght@500;600;700&family=Mulish:wght@400;500;600;700&display=swap');
+
+html, body, .stMarkdown, p, li, label, input, textarea, button {
+    font-family: 'Mulish', sans-serif;
+}
+h1, h2, h3, h4 { font-family: 'Epilogue', sans-serif !important; letter-spacing: -0.01em; }
+
+/* keep Streamlit's Material Symbols icons on their icon font (otherwise the
+   ligature name renders as literal text, e.g. "keyboard_double_arrow_right") */
+[data-testid="stIconMaterial"],
+[class*="material-symbols"],
+span[translate="no"] {
+    font-family: 'Material Symbols Rounded' !important;
+}
+
+/* hide default streamlit chrome for a clean demo */
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stDecoration"] { display: none; }
+.stAppDeployButton, [data-testid="stAppDeployButton"] { display: none !important; }
+
+/* readable content width, centered — like avea-life.com's page container */
+.block-container,
+[data-testid="stMainBlockContainer"] {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+
+.avea-eyebrow {
+    font-size: .78rem; font-weight: 700; letter-spacing: .18em;
+    color: #2DA5B6; text-transform: uppercase; margin-bottom: .15rem;
+}
+.avea-title {
+    font-family: 'Epilogue', sans-serif; font-weight: 600;
+    font-size: 2.05rem; margin: 0 0 .25rem 0; color: #111;
+}
+.avea-sub { color: #5A5A5A; font-size: .95rem; margin-bottom: 1.0rem; }
+
+/* primary button -> avea pill */
+.stButton > button[kind="primary"] {
+    background: #2DA5B6; border: none; border-radius: 999px;
+    padding: .5rem 1.8rem; font-weight: 700; letter-spacing: .02em;
+}
+.stButton > button[kind="primary"]:hover { background: #238D9C; }
+
+/* markdown tables -> branded */
+[data-testid="stMarkdownContainer"] table { width: 100%; border-collapse: collapse; }
+[data-testid="stMarkdownContainer"] th {
+    text-align: left; font-family: 'Epilogue', sans-serif; font-size: .84rem;
+    letter-spacing: .05em; text-transform: uppercase; color: #333;
+    border-bottom: 2px solid #2DA5B6; padding: .5rem .65rem;
+}
+[data-testid="stMarkdownContainer"] td {
+    border-bottom: 1px solid #ECE9E4; padding: .48rem .65rem; font-size: .93rem;
+}
+[data-testid="stMarkdownContainer"] tr:nth-child(even) td { background: #FAF9F7; }
+
+/* suggestions card */
+.avea-card {
+    background: #F8F7F5; border-left: 4px solid #2DA5B6;
+    border-radius: 10px; padding: 1.1rem 1.4rem; margin: .6rem 0 1rem 0;
+}
+.avea-card h3 { margin: 0 0 .5rem 0; font-size: 1.25rem; }
+.avea-card p { margin: 0 0 .6rem 0; }
+.avea-card ul { margin: 0; padding-left: 1.2rem; }
+.avea-card li { margin-bottom: .45rem; }
+
+/* status pills */
+.pill {
+    display: inline-block; border-radius: 999px; padding: .2rem .85rem;
+    font-size: .8rem; font-weight: 700; background: #F0EEEA; color: #6B6B6B;
+}
+.pill.done { background: rgba(45,165,182,.13); color: #1B7F8C; }
+.pill.err  { background: rgba(212,55,71,.12);  color: #B02A38; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    '<div class="avea-eyebrow">AVEA · AI Visibility</div>'
+    '<div class="avea-title">How do AI assistants see your brand?</div>'
+    '<div class="avea-sub">One question — answered independently by our open '
+    'surrogate, ChatGPT and Claude. Brand-level overlap scored, sources '
+    'exposed, action plan generated.</div>',
+    unsafe_allow_html=True,
 )
 
 # Demo-first navigation: the app opens on Ask with the sidebar collapsed;
@@ -199,25 +282,33 @@ if page == "Ask":
 
             # --- live status strip --------------------------------------------
             labels = {"surrogate": "Surrogate", "openai": "ChatGPT",
-                      "claude": "Claude", "judge": "Match scoring"}
-            cols = st.columns(4)
+                      "claude": "Claude", "judge": "Match scoring",
+                      "deep": "Deep analysis"}
+            def _pill(label, state):
+                cls = {"done": " done", "error": " err"}.get(state, "")
+                text = {"done": "done", "running": "running…",
+                        "waiting": "waiting"}.get(state, state)
+                return (f'<span class="pill{cls}">{label} · {text}</span>')
+
+            cols = st.columns(5)
             slots = {}
-            for col, key in zip(cols, ["surrogate", "openai", "claude", "judge"]):
+            for col, key in zip(cols, ["surrogate", "openai", "claude",
+                                       "judge", "deep"]):
                 slots[key] = col.empty()
                 if test_mode:
-                    slots[key].markdown(f"{labels[key]} · **done**")
+                    slots[key].markdown(_pill(labels[key], "done"),
+                                        unsafe_allow_html=True)
                 else:
-                    slots[key].markdown(f"{labels[key]} · *running…*"
-                                        if key != "judge" else f"{labels[key]} · waiting")
+                    init = "running" if key in ("surrogate", "openai", "claude") else "waiting"
+                    slots[key].markdown(_pill(labels[key], init),
+                                        unsafe_allow_html=True)
 
             def _status(system, state):
                 label = labels.get(system, system)
-                if state == "done":
-                    slots[system].markdown(f"{label} · **done**")
-                elif state == "running":
-                    slots[system].markdown(f"{label} · *running…*")
-                else:
-                    slots[system].markdown(f"{label} · :red[{state}]")
+                if state not in ("done", "running", "waiting"):
+                    state = "error"
+                slots[system].markdown(_pill(label, state),
+                                       unsafe_allow_html=True)
 
             if test_mode:
                 import json as _json
@@ -280,11 +371,63 @@ if page == "Ask":
             )
 
             # --- suggestions panel (the headline feature) ----------------------
+            import html as _html
             sug = rec["suggestions"]
-            st.subheader(f"What {rec['brand']} should do")
-            st.markdown(sug["why"])
+            card = [
+                '<div class="avea-card">',
+                f"<h3>What {_html.escape(rec['brand'])} should do</h3>",
+                f"<p>{_html.escape(sug['why'])}</p>",
+                "<ul>",
+            ]
             for a in sug["actions"]:
-                st.markdown(f"- {a}")
+                card.append(f"<li>{_html.escape(a)}</li>")
+            card.append("</ul></div>")
+            st.markdown("".join(card), unsafe_allow_html=True)
+
+            # --- deeper suggestions (rubric-driven analyst output) -------------
+            deep = rec.get("deep")
+            if deep:
+                with st.expander("Deeper suggestions — competitive gaps, "
+                                 "priority plan, rival deep-dive", expanded=False):
+                    st.markdown(deep.get("summary", ""))
+
+                    gaps = deep.get("competitive_gaps") or []
+                    if gaps:
+                        st.markdown("#### What winning brands have that you don't")
+                        rows = ["| Asset | Who has it | Why it wins AI visibility | Your gap |",
+                                "|---|---|---|---|"]
+                        for g in gaps:
+                            who = ", ".join(g.get("brands_with_it") or [])
+                            rows.append(
+                                f"| **{g.get('asset', '')}** | {who} | "
+                                f"{g.get('why_it_matters', '')} | "
+                                f"{g.get('gap_for_brand', '')} |"
+                            )
+                        st.markdown("\n".join(rows))
+
+                    plan = deep.get("priority_plan") or []
+                    if plan:
+                        st.markdown("#### Do this first — priority order")
+                        for p in sorted(plan, key=lambda x: x.get("rank", 99)):
+                            st.markdown(
+                                f"**{p.get('rank', '?')}.** {p.get('action', '')}  \n"
+                                f"&nbsp;&nbsp;&nbsp;*{p.get('horizon', '')} · "
+                                f"{p.get('effort', '')} effort · "
+                                f"{p.get('impact', '')}*"
+                            )
+
+                    rivals = deep.get("rival_deep_dive") or []
+                    if rivals:
+                        st.markdown("#### Rival deep-dive")
+                        for r in rivals:
+                            st.markdown(
+                                f"**{r.get('brand', '')}**  \n"
+                                f"*Why AI ranks them:* {r.get('why_ai_ranks_them', '')}  \n"
+                                f"*Their visible assets:* {r.get('their_visible_assets', '')}  \n"
+                                f"*How to compete:* {r.get('how_to_compete', '')}"
+                            )
+            elif not test_mode:
+                st.caption("Deeper analysis unavailable for this run.")
 
             # --- collapsed detail ----------------------------------------------
             with st.expander("Sources each model consulted"):
