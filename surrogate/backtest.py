@@ -127,7 +127,9 @@ def extract_pick(answer: str) -> dict:
 # ---- TOP-3 SOFT-MATCH metric (decided 2026-05-20 — see module docstring) ---
 
 _SOFT_MATCH_SYSTEM = """You judge whether two product/place names refer to the
-SAME thing for a purchase-intent recommendation. Apply these rules:
+SAME BRAND entity for a purchase-intent recommendation. The signal we care
+about is BRAND VISIBILITY — whether a recommendation surfaces the same brand
+to a buyer — NOT whether the two items are the exact same SKU.
 
 MATCH if any of these hold:
 - Same product/venue with naming variation
@@ -140,25 +142,32 @@ MATCH if any of these hold:
 - Same generation, same line, variant tier difference
     "iPhone 16 Pro" <-> "iPhone 16 Pro Max"
     "MacBook Air M3" <-> "MacBook Air M3 (13-inch)"
+- **Same brand, ANY product line** — this is the brand-level visibility signal
+  we want. If the brand name appears in both items, MATCH regardless of which
+  specific product each side picked.
+    "Nordic Naturals Ultimate Omega" <-> "Nordic Naturals ProDHA Xtra"  (same brand)
+    "ProHealth Longevity"             <-> "ProHealth NMN Pro 1000"      (same brand)
+    "Thorne Resveracel"               <-> "Thorne Magnesium Bisglycinate" (same brand)
+    "Renue By Science Pure NMN"       <-> "Renue By Science Liposomal Spermidine" (same brand)
+    "Double Wood NMN"                 <-> "Double Wood Spermidine"      (same brand)
+    "Sony WH-1000XM6"                 <-> "Sony WF-1000XM5"             (same brand — even earbuds vs headphones)
 
 NO MATCH if:
-- Different major generation
+- Different major generation (within same product line)
     "iPhone 15" <-> "iPhone 16"
     "Llama 3.3" <-> "Llama 4"
-- Different brand / different line / different venue
+- Different brand / different venue
     "Burj Al Arab Jumeirah" <-> "Mandarin Oriental Jumeirah"
     "Nike Vaporfly" <-> "Saucony Endorphin"
-- **Same product TYPE or CATEGORY but different brand** — this is NEVER a match.
+- **Same product TYPE / CATEGORY but different brand** — this is NEVER a match.
   Two distinct brands selling the same kind of supplement / phone / shoe are
-  DIFFERENT products and must NOT be matched. Forbidden reasons include "same
-  product type", "same product category", "both are NMN supplements", "both
-  are spermidine brands". A category overlap is not an identity match.
+  DIFFERENT products. Forbidden reasons include "same product type", "same
+  product category", "both are NMN supplements", "both are spermidine brands".
     "Zein Pharma Spermidine" <-> "Toniiq Spermidine"   (different brands)
     "Tru Niagen NMN"          <-> "ProHealth NMN"      (different brands)
-    "Nike Pegasus 41"         <-> "Asics Gel-Cumulus"  (different brands)
 
-The match must be about IDENTITY (same brand + same product line, possibly
-different version/tier). Same-category-different-brand is a NO MATCH, full stop.
+The match is about BRAND IDENTITY. Same brand, ANY product = MATCH.
+Same category but different brand = NO MATCH, full stop.
 
 Compare each item in list A to EVERY item in list B. An item in A counts as
 matched if it matches ANY item in B.

@@ -114,18 +114,38 @@ def extract_pick_topN(answer: str, *, k: int = 10) -> dict:
 
 # ---- soft-match overlap at arbitrary N --------------------------------------
 
-def soft_match_topN(a_list: list[str], b_list: list[str], *, k: int = 10) -> dict:
-    """Same soft-match rules as backtest.soft_match_top3, parameterised at k.
+def _judge_via_claude(a: list[str], b: list[str]) -> dict:
+    """Fallback judge using Claude (used when GLM is out of balance / fails).
+    Uses Haiku for cost — judge task is simple."""
+    import os
+    from anthropic import Anthropic
+    client = Anthropic(max_retries=3)
+    model = os.environ.get("JUDGE_CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+    user = json.dumps({"A": a, "B": b}, ensure_ascii=False)
+    resp = client.messages.create(
+        model=model,
+        max_tokens=2000,
+        system=_SOFT_MATCH_SYSTEM,
+        messages=[{"role": "user", "content": user}],
+    )
+    text = "".join(b.text for b in resp.content if getattr(b, "type", None) == "text")
+    return {"answer": text, "model": resp.model}
 
-    Uses GLM (z.ai) as the judge. Falls back to normalized-equality on judge
-    error. Score is 0..len(a)."""
+
+def soft_match_topN(a_list: list[str], b_list: list[str], *, k: int = 10) -> dict:
+    """Soft-match overlap with brand-level rules (see backtest._SOFT_MATCH_SYSTEM).
+
+    Judge chain: GLM (z.ai) → Claude Haiku → normalized-equality fallback.
+    """
     a = _clean_ranked(a_list, k=k)
     b = _clean_ranked(b_list, k=k)
     if not a or not b:
         return {"overlap": 0, "matched_pairs": [], "a": a, "b": b,
-                "judge_raw": "", "_ok": False, "_fallback": False}
+                "judge_raw": "", "_ok": False, "_fallback": False, "_judge": "none"}
 
     user = json.dumps({"A": a, "B": b}, ensure_ascii=False)
+
+    # 1. GLM (cheapest when available).
     try:
         r = ask_reference(question=user, system=_SOFT_MATCH_SYSTEM,
                           max_tokens=2000, thinking=False)
@@ -136,20 +156,39 @@ def soft_match_topN(a_list: list[str], b_list: list[str], *, k: int = 10) -> dic
         overlap = int(data.get("overlap", 0))
         overlap = max(0, min(overlap, len(a)))
         return {"overlap": overlap, "matched_pairs": pairs, "a": a, "b": b,
-                "judge_raw": raw, "_ok": True, "_fallback": False}
-    except Exception as e:
-        def n(s):
-            return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", "", s.lower())).strip()
-        nb = [n(x) for x in b]
-        pairs = []
-        for x in a:
-            nx = n(x)
-            for j, y in enumerate(b):
-                if nx == nb[j] or nx in nb[j] or nb[j] in nx:
-                    pairs.append([x, y, "fallback: normalized match"])
-                    break
-        return {"overlap": len(pairs), "matched_pairs": pairs, "a": a, "b": b,
-                "judge_raw": f"[judge error: {e!r}]", "_ok": False, "_fallback": True}
+                "judge_raw": raw, "_ok": True, "_fallback": False, "_judge": "glm"}
+    except Exception as e_glm:
+        glm_err = e_glm
+
+    # 2. Claude Haiku — handles JSON cleanly and we already have the key.
+    try:
+        r = _judge_via_claude(a, b)
+        raw = r["answer"] or ""
+        m = re.search(r"\{.*\}", raw, re.S)
+        data = json.loads(m.group(0)) if m else {}
+        pairs = data.get("matched_pairs") or []
+        overlap = int(data.get("overlap", 0))
+        overlap = max(0, min(overlap, len(a)))
+        return {"overlap": overlap, "matched_pairs": pairs, "a": a, "b": b,
+                "judge_raw": raw, "_ok": True, "_fallback": False,
+                "_judge": f"claude:{r.get('model','')}"}
+    except Exception as e_claude:
+        claude_err = e_claude
+
+    # 3. Normalized substring fallback.
+    def n(s):
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]+", "", s.lower())).strip()
+    nb = [n(x) for x in b]
+    pairs = []
+    for x in a:
+        nx = n(x)
+        for j, y in enumerate(b):
+            if nx == nb[j] or nx in nb[j] or nb[j] in nx:
+                pairs.append([x, y, "fallback: normalized match"])
+                break
+    return {"overlap": len(pairs), "matched_pairs": pairs, "a": a, "b": b,
+            "judge_raw": f"[glm error: {glm_err!r} | claude error: {claude_err!r}]",
+            "_ok": False, "_fallback": True, "_judge": "regex"}
 
 
 # ---- one question ----------------------------------------------------------

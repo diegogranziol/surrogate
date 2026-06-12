@@ -1,0 +1,17 @@
+# Supplements test set — 10 questions focused on Avea-relevant categories.
+# DIFFERENT from data/h2h-mining-supplements.txt (no leakage of training queries
+# into the test set). Each Avea product line is touched at least once.
+
+# --- Structured (top-N specified) ---
+What are the top 10 NMN supplement brands for healthy aging?
+What are the top 10 spermidine supplement brands for longevity?
+What are the top 10 collagen supplements for skin and joints?
+What are the top 10 magnesium supplements for sleep and recovery?
+What are the top 10 omega-3 supplements for cognitive health?
+
+# --- Natural (no top-N) ---
+What's the best NAD+ booster for adults over 40?
+What's the best resveratrol supplement brand?
+Which mitochondrial support supplement is most effective?
+What's the best longevity supplement stack?
+What multivitamin should I take for cellular health?

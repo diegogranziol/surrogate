@@ -1,0 +1,20 @@
+# Mining set — used ONLY to enrich the trusted-domain list for supplements.
+# We run these through Claude + gpt-5, capture which URLs they cite, and add
+# the domains to surrogate/tools/trusted_domains.json. NOT a test set.
+#
+# Deliberately covers categories ADJACENT to (not overlapping with) the test
+# set, so the mined domains generalize to "supplement queries" not just the
+# specific brands we'll test on.
+
+What are the top 10 probiotic supplement brands?
+What are the best CoQ10 supplements?
+What are the top 10 vitamin D supplement brands?
+What's the best ashwagandha supplement?
+What are the top protein powder brands for muscle gain?
+What are the top 10 fish oil supplements?
+What's the best turmeric supplement?
+What are the best zinc supplements?
+What are the top 10 creatine monohydrate brands?
+What's the best magnesium glycinate?
+What are the best berberine supplements?
+What's the best B-complex vitamin?
