@@ -25,9 +25,36 @@ import traceback
 
 import streamlit as st
 
-from surrogate.rag import (
-    delete_doc, ingest_text, ingest_url, list_docs, retrieve,
-)
+# NOTE: surrogate.rag pulls sentence-transformers/torch (heavy). It's only
+# needed by the operator pages (Ingest/Documents) and Retrieve-only mode, so
+# we import it lazily inside those blocks. This keeps the Compare/Test-mode
+# demo — and a lightweight cloud deploy — from loading torch at startup.
+
+def _need_rag():
+    """Lazy-import the RAG module; show a friendly note on torch-free deploys."""
+    try:
+        import surrogate.rag as _rag
+        return _rag
+    except Exception as e:
+        st.info(
+            "This page needs the embedding extras (sentence-transformers), "
+            "which aren't installed on the lightweight demo build. Run "
+            "`pip install -r requirements-rag.txt` locally to enable it.",
+            icon="ℹ️",
+        )
+        st.caption(f"import detail: {e!r}")
+        st.stop()
+
+# On Streamlit Community Cloud, API keys are set in the dashboard's Secrets.
+# Our frontier clients read os.environ, so bridge any secrets across. No-op
+# locally (.env handles it) and in Test mode (no keys needed).
+try:
+    for _k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TAVILY_API_KEY",
+               "ZAI_API_KEY", "FRONTIER_OPENAI_MODEL", "FRONTIER_CLAUDE_MODEL"):
+        if _k in st.secrets and not os.environ.get(_k):
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
 
 st.set_page_config(
     page_title="AVEA · AI Visibility",
@@ -65,26 +92,53 @@ span[translate="no"] {
 [data-testid="stMainBlockContainer"] {
     max-width: 1080px;
     margin: 0 auto;
+    padding-top: 4.2rem;   /* clear streamlit's fixed top bar (~3.75rem) */
     padding-left: 2rem;
     padding-right: 2rem;
 }
 
-.avea-eyebrow {
-    font-size: .78rem; font-weight: 700; letter-spacing: .18em;
-    color: #2DA5B6; text-transform: uppercase; margin-bottom: .15rem;
+/* widget labels ("Your question", "Mode", "Brand to track", …) */
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] label {
+    font-size: 1.12rem !important;
+    font-weight: 600;
+    color: #222;
 }
-.avea-title {
-    font-family: 'Epilogue', sans-serif; font-weight: 600;
-    font-size: 2.05rem; margin: 0 0 .25rem 0; color: #111;
-}
-.avea-sub { color: #5A5A5A; font-size: .95rem; margin-bottom: 1.0rem; }
 
-/* primary button -> avea pill */
-.stButton > button[kind="primary"] {
+.avea-header {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1.2rem; margin: 0 0 2.4rem 0;
+    font-family: 'Epilogue', sans-serif; font-weight: 600;
+    font-size: 1.45rem; letter-spacing: .04em;
+}
+.avea-header img { height: 2.4rem; display: block; }
+.avea-header .accent { color: #2DA5B6; }
+
+/* section rhythm: larger titles, more air between blocks */
+[data-testid="stMainBlockContainer"] h2 {
+    font-size: 1.7rem; margin: 2.2rem 0 .9rem 0;
+}
+[data-testid="stMainBlockContainer"] h3 {
+    font-size: 1.45rem; margin: 2.0rem 0 .8rem 0;
+}
+[data-testid="stMainBlockContainer"] h4 {
+    font-size: 1.18rem; margin: 1.6rem 0 .6rem 0;
+}
+[data-testid="stExpander"] { margin-top: 1.2rem; }
+[data-testid="stExpander"] summary span,
+[data-testid="stExpander"] summary p {
+    font-size: 1.05rem; font-weight: 600;
+}
+
+/* primary button -> avea pill (covers normal + form-submit buttons) */
+.stButton > button[kind="primary"],
+[data-testid="stFormSubmitButton"] > button {
     background: #2DA5B6; border: none; border-radius: 999px;
     padding: .5rem 1.8rem; font-weight: 700; letter-spacing: .02em;
+    color: #fff;
 }
-.stButton > button[kind="primary"]:hover { background: #238D9C; }
+.stButton > button[kind="primary"]:hover,
+[data-testid="stFormSubmitButton"] > button:hover { background: #238D9C; }
 
 /* markdown tables -> branded */
 [data-testid="stMarkdownContainer"] table { width: 100%; border-collapse: collapse; }
@@ -103,7 +157,8 @@ span[translate="no"] {
     background: #F8F7F5; border-left: 4px solid #2DA5B6;
     border-radius: 10px; padding: 1.1rem 1.4rem; margin: .6rem 0 1rem 0;
 }
-.avea-card h3 { margin: 0 0 .5rem 0; font-size: 1.25rem; }
+.avea-card { margin-top: 1.6rem; }
+.avea-card h3 { margin: 0 0 .6rem 0 !important; font-size: 1.4rem; }
 .avea-card p { margin: 0 0 .6rem 0; }
 .avea-card ul { margin: 0; padding-left: 1.2rem; }
 .avea-card li { margin-bottom: .45rem; }
@@ -120,12 +175,21 @@ span[translate="no"] {
     unsafe_allow_html=True,
 )
 
+@st.cache_data
+def _logo_b64() -> str:
+    import base64
+    from pathlib import Path
+    p = Path(__file__).parent / "static" / "avea_logo.png"
+    return base64.b64encode(p.read_bytes()).decode()
+
+
+try:
+    _logo_html = f'<img src="data:image/png;base64,{_logo_b64()}" alt="AVEA"/>'
+except Exception:
+    _logo_html = "AVEA"  # fall back to text if the asset is missing
 st.markdown(
-    '<div class="avea-eyebrow">AVEA · AI Visibility</div>'
-    '<div class="avea-title">How do AI assistants see your brand?</div>'
-    '<div class="avea-sub">One question — answered independently by our open '
-    'surrogate, ChatGPT and Claude. Brand-level overlap scored, sources '
-    'exposed, action plan generated.</div>',
+    f'<div class="avea-header">{_logo_html}'
+    '<span class="accent">AI Visibility Analyzer</span></div>',
     unsafe_allow_html=True,
 )
 
@@ -136,6 +200,21 @@ with st.sidebar:
         "Section",
         ["Ask", "Settings", "Ingest", "Documents", "Compare two URLs"],
     )
+    mode = "Compare"
+    if page == "Ask":
+        mode = st.selectbox(
+            "Mode",
+            [
+                "Compare — surrogate vs ChatGPT + Claude",
+                "Surrogate — 7-tool deep-research agent",
+                "Retrieve only — search ingested docs",
+            ],
+            help=(
+                "Compare: the brand-visibility demo (3 systems in parallel). "
+                "Surrogate: just our agent, with visible reasoning. "
+                "Retrieve only: local doc search, no model call."
+            ),
+        )
     st.divider()
     test_mode = st.toggle(
         "Test mode",
@@ -150,6 +229,8 @@ with st.sidebar:
 # ----- INGEST ----------------------------------------------------------------
 
 if page == "Ingest":
+    _rag = _need_rag()
+    ingest_text, ingest_url = _rag.ingest_text, _rag.ingest_url
     st.subheader("Ingest URLs")
     urls_text = st.text_area(
         "Paste one URL per line",
@@ -187,6 +268,8 @@ if page == "Ingest":
 # ----- DOCUMENTS --------------------------------------------------------------
 
 if page == "Documents":
+    _rag = _need_rag()
+    delete_doc, list_docs = _rag.delete_doc, _rag.list_docs
     rows = list_docs()
     if not rows:
         st.info("Store is empty. Ingest something on the Ingest tab.")
@@ -206,51 +289,48 @@ if page == "Documents":
 # ----- ASK --------------------------------------------------------------------
 
 if page == "Ask":
-    q = st.text_input(
-        "Your question",
-        value="What are the top 10 Swiss supplement brands?" if test_mode else "",
-        placeholder="e.g. which restaurant is the best for italian food in Tashkent",
-    )
-    mode = st.radio(
-        "Mode",
-        [
-            "Compare — surrogate vs ChatGPT + Claude (brand-visibility demo)",
-            "Surrogate — deep-research agent (7-tool ReAct loop)",
-            "Retrieve only — search ingested docs (no model call)",
-        ],
-        horizontal=False,
-    )
-
-    # Mode-specific controls only — keeps the demo view uncluttered.
+    # `mode` comes from the sidebar dropdown. The form makes Enter in any
+    # text field submit the run; mode-specific controls swap live because
+    # the selectbox lives outside the form.
     brand, k, compare_glm = "Avea", 5, False
-    if mode.startswith("Compare"):
-        brand = st.text_input(
-            "Brand to track",
-            value="Avea",
-            help=(
-                "Compare mode checks whether this brand appears in each "
-                "system's ranked answer and generates the action plan for it."
-            ),
+    with st.form("ask_form", border=False):
+        q = st.text_input(
+            "Your question",
+            value="What are the top 10 Swiss supplement brands?" if test_mode else "",
+            placeholder="e.g. which restaurant is the best for italian food in Tashkent",
         )
-    elif mode.startswith("Surrogate"):
-        compare_glm = st.checkbox(
-            "Also call GLM reference (same evidence, side-by-side)",
-            value=False,
-            help=(
-                "After the surrogate runs, send the SAME evidence pack the "
-                "surrogate gathered (tool outputs from `search`, `fetch_url`, "
-                "`extract_entity`) to the GLM reference (z.ai) and show both "
-                "answers side-by-side. Apples-to-apples fidelity comparison."
-            ),
-        )
-    else:
-        k = st.slider(
-            "Top-k retrieved chunks", 1, 10, 5,
-            help="Number of chunks returned from the user-RAG store.",
-        )
+        if mode.startswith("Compare"):
+            brand = st.text_input(
+                "Brand to track",
+                value="Avea",
+                help=(
+                    "Compare mode checks whether this brand appears in each "
+                    "system's ranked answer and generates the action plan for it."
+                ),
+            )
+        elif mode.startswith("Surrogate"):
+            compare_glm = st.checkbox(
+                "Also call GLM reference (same evidence, side-by-side)",
+                value=False,
+                help=(
+                    "After the surrogate runs, send the SAME evidence pack the "
+                    "surrogate gathered (tool outputs from `search`, `fetch_url`, "
+                    "`extract_entity`) to the GLM reference (z.ai) and show both "
+                    "answers side-by-side. Apples-to-apples fidelity comparison."
+                ),
+            )
+        else:
+            k = st.slider(
+                "Top-k retrieved chunks", 1, 10, 5,
+                help="Number of chunks returned from the user-RAG store.",
+            )
+        submitted = st.form_submit_button("Run", type="primary")
 
-    if st.button("Run", type="primary", disabled=not q.strip()):
+    if submitted and not q.strip():
+        st.warning("Type a question first.")
+    if submitted and q.strip():
         if mode.startswith("Retrieve only"):
+            retrieve = _need_rag().retrieve
             with st.spinner("Embedding question + searching store ..."):
                 hits = retrieve(q, k=k)
             if not hits:

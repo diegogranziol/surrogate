@@ -1,3 +1,8 @@
+# Runtime deps for the Streamlit demo + the surrogate/compare pipeline.
+# Intentionally torch-free so Streamlit Community Cloud builds fast and stays
+# within its memory limit. The RAG/embedding extras (sentence-transformers,
+# torchvision) live in requirements-rag.txt — install those locally only if
+# you use the Ingest / Documents / Retrieve-only operator pages.
 openai>=1.50.0
 anthropic>=0.40.0
 json5>=0.9.25
@@ -10,7 +15,5 @@ curl_cffi>=0.7.0
 httpx>=0.27.0
 rich>=13.0.0
 python-dotenv>=1.0.0
-sentence-transformers>=3.0.0
-torchvision>=0.18.0
 numpy>=1.26.0
 streamlit>=1.36.0
