@@ -28,6 +28,7 @@ from surrogate.head_to_head import soft_match_topN
 from surrogate.compare import (
     make_advice, brand_hit, _grounded_why,
     claude_consulted_urls, openai_cited_urls, deep_suggestions,
+    surrogate_trajectory,
 )
 
 QUESTION = "What are the top 10 Swiss supplement brands?"
@@ -63,6 +64,7 @@ def main() -> int:
             "answer": sur.get("answer", ""),
             "thinking": sur.get("thinking", ""),
             "ranked": sur.get("ranked", []),
+            "trajectory": surrogate_trajectory(sur.get("bundle")),
             "steps": sur.get("steps"),
             "termination": sur.get("termination"),
             "bundle": sur.get("bundle"),

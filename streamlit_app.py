@@ -218,11 +218,11 @@ with st.sidebar:
     st.divider()
     test_mode = st.toggle(
         "Test mode",
-        value=False,
+        value=True,
         help=(
-            "Render the Compare results page from canned data (a real past "
-            "run) without calling any model — for previewing the UI when the "
-            "GPU box is down."
+            "ON by default: renders the Compare results from canned data (a "
+            "real past run), no model calls — ideal for demos and when the GPU "
+            "box is down. Turn OFF to run the question live."
         ),
     )
 
@@ -464,6 +464,29 @@ if page == "Ask":
             card.append("</ul></div>")
             st.markdown("".join(card), unsafe_allow_html=True)
 
+            # --- transparency timeline (how the surrogate reached this) --------
+            # Rendered as an isolated HTML component so the click-to-reveal
+            # interaction works (st.markdown strips the onclick JS). Shares the
+            # exact renderer with the static demo via surrogate.demo_render.
+            traj = rec["systems"]["surrogate"].get("trajectory") or []
+            if traj:
+                import streamlit.components.v1 as _components
+                from surrogate.demo_render import (
+                    trajectory_component_html, estimate_height,
+                )
+                st.markdown("### How our surrogate reached this")
+                st.caption(
+                    "Every step the model took — its live reasoning bound to the "
+                    "action it triggered. Click any highlighted phrase to reveal "
+                    "the exact sources the model pulled. The frontier models "
+                    "don't expose this."
+                )
+                _components.html(
+                    trajectory_component_html(traj),
+                    height=estimate_height(traj),
+                    scrolling=True,
+                )
+
             # --- deeper suggestions (rubric-driven analyst output) -------------
             deep = rec.get("deep")
             if deep:
@@ -532,8 +555,14 @@ if page == "Ask":
                         continue
                     st.write(s.get("answer") or "(empty)")
                     if s.get("thinking"):
-                        st.markdown("**Reasoning (verbatim):**")
-                        st.text(s["thinking"])
+                        # Surrogate reasoning is shown step-by-step (with its
+                        # sources) in the timeline above — don't dump it again.
+                        if key == "surrogate" and traj:
+                            st.caption("↑ Step-by-step reasoning with sources is "
+                                       "in the timeline above.")
+                        else:
+                            st.markdown("**Reasoning (verbatim):**")
+                            st.text(s["thinking"])
         else:
             # New single-stage ReAct loop with the 7-tool engineered workflow.
             try:

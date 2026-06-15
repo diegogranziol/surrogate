@@ -86,6 +86,157 @@ def _domain_of(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+# ---- surrogate trajectory (ordered think -> action -> sources) --------------
+# Parsed from the run's trace.jsonl so the UI can show, step by step, what the
+# surrogate was thinking and exactly which URLs each action pulled. This is the
+# transparency story: every thought is bound to the tool call it triggered and
+# the sources that came back. We own this trace, so we can do it for the
+# surrogate in a way the frontier APIs don't expose.
+
+_THINK_RX = re.compile(r"<think>(.*?)</think>", re.S)
+_URL_RX = re.compile(r"https?://[^\s)\]\"']+")
+
+
+def _think_from(content: str) -> str:
+    blocks = _THINK_RX.findall(content or "")
+    return "\n\n".join(b.strip() for b in blocks if b.strip())
+
+
+def _action_summary(name: str, args: dict) -> str:
+    if name == "search":
+        q = args.get("query")
+        if isinstance(q, list):
+            return "searched " + " · ".join(f'"{x}"' for x in q)
+        return f'searched "{q}"'
+    if name in ("fetch_url", "extract_entity"):
+        return f"read {args.get('url', '')}"
+    if name == "verify_fact":
+        return f'verified "{(args.get("claim") or "")[:80]}"'
+    if name == "check_missing_fields":
+        return "checked completeness of a candidate"
+    if name == "think":
+        return "reflected"
+    if name == "stop_and_answer":
+        return "finalised the answer"
+    return name
+
+
+def _urls_from_result(result_text: str, args: dict) -> list[str]:
+    raw = _URL_RX.findall(str(result_text or ""))
+    for key in ("url", "evidence_url"):
+        if args.get(key):
+            raw.insert(0, str(args[key]))
+    # strip trailing punctuation, dedup by normalised form (keep first/cleanest)
+    seen, out = set(), []
+    for u in raw:
+        u = u.rstrip(".,:;)]}\"'")
+        key = u.rstrip("/").lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(u)
+    return out
+
+
+def _parse_extracted_facts(text: str) -> tuple[list[dict], str]:
+    """From an extract_entity result, pull structured entities and an
+    OpenGraph title. Returns (facts, og_title)."""
+    facts: list[dict] = []
+    og_title = ""
+    cur: dict | None = None
+    keep = ("name", "rating", "review_count", "price", "currency", "price_range")
+    for line in str(text or "").splitlines():
+        m = re.match(r"\[\d+\] @type:\s*(.+)", line)
+        if m:
+            if cur:
+                facts.append(cur)
+            cur = {"type": m.group(1).strip()}
+        elif cur is not None and line.startswith("  ") and ":" in line:
+            k, _, v = line.strip().partition(":")
+            if k.strip() in keep:
+                cur[k.strip()] = v.strip()
+        elif line.startswith("OpenGraph:"):
+            if cur:
+                facts.append(cur); cur = None
+            mt = re.search(r'"og:title":\s*"([^"]+)"', line)
+            if mt:
+                og_title = mt.group(1)
+    if cur:
+        facts.append(cur)
+    # keep only entities that carry at least one useful field beyond type
+    facts = [f for f in facts if len(f) > 1]
+    return facts, og_title
+
+
+def _parse_verification(text: str) -> dict:
+    """From a verify_fact result, pull the claim + verdict."""
+    out: dict = {}
+    for line in str(text or "").splitlines():
+        if line.startswith("Claim:"):
+            out["claim"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Source:"):
+            out["source"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Supported:"):
+            rest = line.split(":", 1)[1].strip()
+            out["verdict"] = rest.split()[0].lower() if rest else ""
+    return out
+
+
+def surrogate_trajectory(bundle_dir: str | None) -> list[dict]:
+    """Ordered [{think, action, tool, urls}] from the surrogate's trace.jsonl.
+    Returns [] if the bundle/trace is missing."""
+    if not bundle_dir:
+        return []
+    trace = Path(bundle_dir) / "trace.jsonl"
+    if not trace.exists():
+        return []
+
+    # group events by step
+    by_step: dict[int, dict] = {}
+    for line in trace.read_text().splitlines():
+        if not line.strip():
+            continue
+        e = json.loads(line)
+        step = e.get("step")
+        if step is None:
+            continue
+        by_step.setdefault(step, {})[e["kind"]] = e
+
+    out: list[dict] = []
+    for step in sorted(by_step):
+        ev = by_step[step]
+        resp = ev.get("llm_response", {})
+        call = ev.get("tool_call", {})
+        result = ev.get("tool_result", {}) or ev.get("tool_error", {})
+        think = _think_from(resp.get("content", ""))
+        name = call.get("name")
+        if not think and not name:
+            continue
+        args = call.get("args", {}) or {}
+        result_text = result.get("result", "")
+        urls = _urls_from_result(result_text, args) if name else []
+        # don't show URLs for tools that don't carry external sources
+        if name in ("think", "check_missing_fields", "stop_and_answer"):
+            urls = []
+
+        facts, og_title, verify = [], "", None
+        if name == "extract_entity":
+            facts, og_title = _parse_extracted_facts(result_text)
+        elif name == "verify_fact":
+            verify = _parse_verification(result_text)
+
+        out.append({
+            "step": step,
+            "think": think,
+            "tool": name,
+            "action": _action_summary(name, args) if name else None,
+            "urls": urls,
+            "facts": facts,
+            "og_title": og_title,
+            "verify": verify,
+        })
+    return out
+
+
 # ---- brand visibility + suggestions -----------------------------------------
 
 def brand_hit(ranked: list[str], brand: str) -> str | None:
@@ -362,14 +513,16 @@ def compare_run(
         res = loop_run(question, tools=default_tools(), log_root=log_root)
         answer = res.final_answer or ""
         picks = extract_pick_topN(answer, k=k)
+        bundle = str(res.bundle_dir) if res.bundle_dir else None
         return {
             "model": "qwen3-32b (surrogate)",
             "answer": answer,
             "thinking": _concat_thinking(res.messages),
+            "trajectory": surrogate_trajectory(bundle),
             "ranked": picks["ranked"],
             "steps": res.steps,
             "termination": res.termination,
-            "bundle": str(res.bundle_dir) if res.bundle_dir else None,
+            "bundle": bundle,
             "duration_s": time.time() - t0,
         }
 
