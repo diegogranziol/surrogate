@@ -267,7 +267,7 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
         label = {"surrogate": "the open-model proxy", "claude": "Claude", "openai": "ChatGPT"}[which]
         why = f"Avea appears only in {label}'s answer; the other two systems don't surface it."
     else:
-        why = "Avea's visibility is uneven — it appears in some systems but not consistently."
+        why = "Avea's visibility is uneven. It appears in some systems but not others."
 
     actions: list[str] = []
     if "nmn" in q or "nad+" in q or "nad " in q:
@@ -283,16 +283,15 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
         actions.append("Secure a review or comparative mention on oxfordhealthspan.com, which "
                        "is cited repeatedly across spermidine queries and currently "
                        "highlights Primeadine without mentioning Avea Spermidine.")
-        actions.append("Submit Avea Spermidine for ConsumerLab review — the supplement-testing "
-                       "site does not yet have a spermidine category review and Avea could "
-                       "drive its creation.")
+        actions.append("Submit Avea Spermidine for ConsumerLab review. The site has no "
+                       "spermidine category review yet, so Avea could drive its creation.")
         actions.append("Commission or publish a head-to-head bioavailability study against "
                        "spermidineLIFE (the dominant brand in current AI answers). "
                        "PubMed-indexed evidence is the surest route into ChatGPT's citation pool.")
     elif "collagen" in q:
         actions.append("Submit Avea Bio-Collagen for ConsumerLab testing. Every system lists "
-                       "Vital Proteins, Momentous, or Ancient Nutrition — ConsumerLab is the "
-                       "underlying source that puts brands into those rankings.")
+                       "Vital Proteins, Momentous, or Ancient Nutrition, and ConsumerLab is "
+                       "the underlying source that puts brands into those rankings.")
         actions.append("Pitch inclusion in livemomentous.com or health.com collagen comparison "
                        "articles. Both are cited multiple times in Claude and ChatGPT responses.")
         actions.append("Add Product / Review / AggregateRating schema markup to Avea's "
@@ -300,8 +299,8 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
                        "frontier AIs retrieve.")
     elif "magnesium" in q:
         actions.append("Pitch the next Healthline \"best magnesium supplements\" refresh. "
-                       "Their current list runs Thorne, Pure Encapsulations, NOW Foods — "
-                       "no Swiss brand is included.")
+                       "Their current list runs Thorne, Pure Encapsulations, and NOW "
+                       "Foods, with no Swiss brand on it.")
         actions.append("Get listed on consumerlab.com's magnesium category review page. "
                        "This single placement reaches both Claude and ChatGPT.")
     elif "omega" in q or "fish oil" in q:
@@ -309,7 +308,7 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
                        "ChatGPT cites certifications.nutrasource.ca explicitly when picking "
                        "fish oil brands.")
         actions.append("Pitch Avea Omega-3 into comparison reviews alongside Nordic Naturals "
-                       "and Carlson — these dominate every system's omega-3 answer.")
+                       "and Carlson, which dominate every system's omega-3 answer.")
     elif "swiss" in q:
         actions.append("ChatGPT and Claude build their \"Swiss supplement brands\" answers "
                        "from heritage-brand listings (Burgerstein, A.Vogel, Bio-Strath, Nestlé "
@@ -319,7 +318,7 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
                        "Handelszeitung. ChatGPT pulls from Swiss business and lifestyle press "
                        "for this query.")
         actions.append("Apply for membership listings with Swiss Sport Nutrition Society and "
-                       "similar trade bodies — their public member directories appear in "
+                       "similar trade bodies. Their public member directories show up in "
                        "ChatGPT's source set for Swiss-brand questions.")
     elif "longevity" in q or "mitochondrial" in q or "cellular health" in q or "multivitamin" in q:
         actions.append("For these broader queries, frontier systems often answer at the "
@@ -332,12 +331,12 @@ def make_advice(question: str, hits: dict, picks: dict) -> tuple[str, list[str]]
                        "are cited as authority sources across all longevity queries.")
     elif "resveratrol" in q:
         actions.append("Pitch Avea Resveratrol into Momentous and Double Wood resveratrol "
-                       "comparisons — these are the two brands ChatGPT lists first.")
+                       "comparisons, the two brands ChatGPT lists first.")
         actions.append("Submit Avea Resveratrol for ConsumerLab review and seek listing in "
                        "Healthline's resveratrol category coverage.")
     else:
         actions.append("Pitch Avea for inclusion on Healthline, Fortune, ConsumerLab, and "
-                       "Innerbody — the four highest-frequency sources in supplement "
+                       "Innerbody, the four highest-frequency sources in supplement "
                        "answers across both frontier systems.")
         actions.append("Obtain independent third-party testing through NSF or Nutrasource "
                        "to register on the certification lookups ChatGPT consults.")

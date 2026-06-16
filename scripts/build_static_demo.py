@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from surrogate.demo_render import (  # noqa: E402
     trajectory_inner_html, TRAJECTORY_CSS, TRAJECTORY_JS, OVERLAY_HTML,
+    graph_panels, CHART_CSS,
 )
 FIXTURE = ROOT / "data/demo_fixture.json"
 LOGO = ROOT / "static/avea_logo.png"
@@ -39,9 +40,9 @@ def render_trajectory(traj) -> str:
         return ""
     return (
         "<div class='traj'><h3>How our surrogate reached this</h3>"
-        "<p class='cap'>Every step the model took — its live reasoning bound to "
-        "the action it triggered. <strong>Click any highlighted phrase</strong> "
-        "to reveal the exact sources the model pulled at that step. "
+        "<p class='cap'>Every step the model took: its live reasoning, and the "
+        "action each thought triggered. <strong>Click any highlighted phrase</strong> "
+        "to see the exact sources the model pulled at that step. "
         "The frontier models don't expose this.</p>"
         + trajectory_inner_html(traj) + "</div>"
     )
@@ -122,7 +123,7 @@ def build() -> str:
             f"{esc(p.get('impact'))}</em></p>"
             for p in plan
         )
-        plan_html = f"<h4>Do this first — priority order</h4>{plan_html}" if plan else ""
+        plan_html = f"<h4>Do this first, in priority order</h4>{plan_html}" if plan else ""
 
         rivals = deep.get("rival_deep_dive") or []
         rivals_html = "".join(
@@ -135,7 +136,7 @@ def build() -> str:
         rivals_html = f"<h4>Rival deep-dive</h4>{rivals_html}" if rivals else ""
 
         deep_html = (
-            "<details class='block'><summary>Deeper suggestions — competitive "
+            "<details class='block'><summary>Deeper suggestions: competitive "
             "gaps, priority plan, rival deep-dive</summary>"
             f"<p>{esc(deep.get('summary',''))}</p>{gaps_tbl}{plan_html}{rivals_html}"
             "</details>"
@@ -153,20 +154,28 @@ def build() -> str:
         + "</ul></details>"
     )
 
-    # full answers — surrogate reasoning lives in the timeline above, so we
-    # don't re-dump it here (it would be the same <think> content twice).
-    have_traj = bool(sysd["surrogate"].get("trajectory"))
-
+    # full answers — for the surrogate, its "reasoning" is the interactive
+    # step-by-step trajectory (click a phrase → sources). Frontiers show their
+    # verbatim thinking since we can't bind theirs to sources.
     def ans_block(key, label):
         s = sysd[key]
         body = esc(s.get("answer") or "(empty)").replace("\n", "<br>")
         think = ""
-        if s.get("thinking") and not (key == "surrogate" and have_traj):
+        if key == "surrogate":
+            traj = s.get("trajectory") or []
+            if traj:
+                think = (
+                    "<p><strong>Reasoning, step by step, with sources.</strong> "
+                    "<span class='cap'>Click any highlighted phrase to see the "
+                    "exact sources that step pulled.</span></p>"
+                    f"<div class='traj'>{trajectory_inner_html(traj)}</div>"
+                )
+            elif s.get("thinking"):
+                think = ("<p><strong>Reasoning (verbatim):</strong></p>"
+                         f"<pre>{esc(s['thinking'])}</pre>")
+        elif s.get("thinking"):
             think = ("<p><strong>Reasoning (verbatim):</strong></p>"
                      f"<pre>{esc(s['thinking'])}</pre>")
-        elif key == "surrogate" and have_traj:
-            think = ("<p class='cap'>Step-by-step reasoning with sources is in "
-                     "the “How our surrogate reached this” timeline above.</p>")
         return f"<h4>{label} · {esc(s.get('model',''))}</h4><p>{body}</p>{think}"
     answers = (
         "<details class='block'><summary>Full answers &amp; reasoning (verbatim)</summary>"
@@ -184,19 +193,24 @@ def build() -> str:
     logo_tag = (f"<img src='data:image/png;base64,{logo_b64}' alt='AVEA'/>"
                 if logo_b64 else "AVEA")
 
-    trajectory = render_trajectory(sysd["surrogate"].get("trajectory"))
+    # Graph panels (brand visibility + domain authority, plus any conditional
+    # ones) sit right after the suggestions card, side by side, as evidence.
+    _panels = graph_panels(rec)
+    charts = f"<div class='charts-row'>{''.join(_panels)}</div>" if _panels else ""
 
+    # The surrogate trajectory now lives inside the Full answers section (as the
+    # surrogate's reasoning), so it's not a standalone block here.
     results = (
         f"<div class='pills'>{pills}</div>"
         f"{picks_table}<p class='cap'>{caption}</p>"
-        f"{card}{trajectory}{deep_html}{src}{answers}"
+        f"{card}{charts}{deep_html}{src}{answers}"
     )
 
     return _TEMPLATE.format(
         question=esc(question),
         results=results,
         logo=logo_tag,
-        traj_css=TRAJECTORY_CSS,
+        traj_css=TRAJECTORY_CSS + CHART_CSS,
         traj_js=TRAJECTORY_JS,
         overlay=OVERLAY_HTML,
     )

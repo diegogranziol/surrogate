@@ -95,8 +95,8 @@ def _evidence_html(step: dict) -> str:
             cls = {"yes": "vf-yes", "partial": "vf-partial", "no": "vf-no"}.get(verdict, "")
             mark = {"yes": "&#10003;", "partial": "&#126;", "no": "&#10007;"}.get(verdict, "")
             claim = _esc((v.get("claim") or "")[:90])
-            return (f"<div class='vf {cls}'>{mark} verified: "
-                    f"&ldquo;{claim}&rdquo; — {label}</div>")
+            return (f"<div class='vf {cls}'>{mark} verified &ldquo;{claim}&rdquo;: "
+                    f"{label}</div>")
     return ""
 
 
@@ -207,6 +207,216 @@ TRAJECTORY_CSS = """
 .pop ul { margin:0; padding-left:1.1rem; max-height:300px; overflow:auto; }
 .pop li { margin-bottom:.35rem; font-size:.85rem; }
 a { color:var(--teal); word-break:break-all; }
+"""
+
+
+def domain_authority_html(openai_urls, claude_urls, *, top_n: int = 8,
+                          category: str = "this") -> str:
+    """CSS-bar chart of the domains ChatGPT + Claude actually cited, ranked by
+    frequency. Dependency-free. This is the evidence behind the 'get featured
+    on these domains' advice."""
+    from collections import Counter
+    from urllib.parse import urlparse
+
+    def _dom(u):
+        try:
+            h = urlparse(u).netloc.lower()
+        except Exception:
+            return ""
+        return h[4:] if h.startswith("www.") else h
+
+    counts: Counter = Counter()
+    for u in (openai_urls or []):
+        d = _dom(u)
+        if d:
+            counts[d] += 1
+    for u in (claude_urls or []):
+        d = _dom(u)
+        if d:
+            counts[d] += 1
+    items = [(d, n) for d, n in counts.most_common(top_n) if d]
+    if not items:
+        return ""
+    mx = max(n for _, n in items)
+
+    # --- crisp inline-SVG horizontal bar chart (dependency-free) -------------
+    label_w, gap, bar_max, val_w = 196, 10, 360, 42
+    row_h, pad_t, pad_b = 34, 10, 8
+    bar_x = label_w + gap
+    width = bar_x + bar_max + val_w
+    height = pad_t + len(items) * row_h + pad_b
+
+    def _short(d, lim=26):
+        return d if len(d) <= lim else d[: lim - 1] + "…"
+
+    bars = []
+    for i, (d, n) in enumerate(items):
+        y = pad_t + i * row_h
+        cy = y + row_h / 2
+        bw = max(4, bar_max * n / mx)
+        top = i == 0  # highlight the leader
+        fill = "#1B8090" if top else "#2DA5B6"
+        bars.append(
+            f"<text x='{label_w}' y='{cy:.0f}' dominant-baseline='central' "
+            f"text-anchor='end' class='svglbl'>{_esc(_short(d))}</text>"
+            f"<rect x='{bar_x}' y='{y + 7}' width='{bw:.1f}' height='{row_h - 14}' "
+            f"rx='5' fill='{fill}'></rect>"
+            f"<text x='{bar_x + bw + 8:.1f}' y='{cy:.0f}' dominant-baseline='central' "
+            f"class='svgval'>{n}</text>"
+        )
+    svg = (
+        f"<svg viewBox='0 0 {width} {height}' class='dchart' "
+        f"role='img' preserveAspectRatio='xMinYMin meet'>{''.join(bars)}</svg>"
+    )
+    return (
+        "<div class='chart'>"
+        f"<div class='charthd'>Where AI looks when answering {_esc(category)}</div>"
+        "<div class='chartsub'>Domains ChatGPT and Claude actually cited to build "
+        "their answers, ranked by frequency. These are the sources a brand needs "
+        "to appear on to get recommended.</div>"
+        f"{svg}</div>"
+    )
+
+
+def brand_visibility_html(systems: dict, matches: dict, brand: str,
+                          *, top_n: int = 9, category: str = "this") -> str:
+    """Bar chart: how many of the 3 systems surface each brand (0–3), brands
+    clustered across systems via the judge's matched pairs. The tracked brand
+    is pinned (red) if no system surfaced it. Always computable from a run."""
+    lists = {
+        "surrogate": systems.get("surrogate", {}).get("ranked") or [],
+        "openai": systems.get("openai", {}).get("ranked") or [],
+        "claude": systems.get("claude", {}).get("ranked") or [],
+    }
+    if not any(lists.values()):
+        return ""
+
+    parent: dict = {}
+    info: dict = {}
+
+    def key(sys, item):
+        return (sys, item.strip().lower())
+
+    def find(x):
+        parent.setdefault(x, x)
+        root = x
+        while parent[root] != root:
+            root = parent[root]
+        while parent[x] != root:
+            parent[x], x = root, parent[x]
+        return root
+
+    def union(a, b):
+        parent.setdefault(a, a); parent.setdefault(b, b)
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    for sys, items in lists.items():
+        for it in items:
+            k = key(sys, it)
+            parent.setdefault(k, k)
+            info.setdefault(k, {"name": it, "sys": sys})
+
+    for sa, sb, mkey in (("surrogate", "openai", "sur_openai"),
+                         ("surrogate", "claude", "sur_claude"),
+                         ("openai", "claude", "openai_claude")):
+        for p in (matches.get(mkey, {}).get("matched_pairs") or []):
+            if len(p) >= 2:
+                ka, kb = key(sa, str(p[0])), key(sb, str(p[1]))
+                parent.setdefault(ka, ka); info.setdefault(ka, {"name": p[0], "sys": sa})
+                parent.setdefault(kb, kb); info.setdefault(kb, {"name": p[1], "sys": sb})
+                union(ka, kb)
+
+    comps: dict = {}
+    for k in list(parent):
+        r = find(k)
+        c = comps.setdefault(r, {"systems": set(), "names": []})
+        c["systems"].add(info[k]["sys"])
+        c["names"].append(info[k]["name"])
+
+    entries = [(sorted(c["names"], key=len)[0], len(c["systems"]))
+               for c in comps.values()]
+    # collapse display-name duplicates, keep the higher count
+    best: dict = {}
+    for name, cnt in entries:
+        nk = name.strip().lower()
+        if nk not in best or cnt > best[nk][1]:
+            best[nk] = (name, cnt)
+    entries = sorted(best.values(), key=lambda e: (-e[1], e[0].lower()))[:top_n]
+
+    # tracked brand: present in any list?
+    present = any(brand.lower() in str(it).lower()
+                  for items in lists.values() for it in items)
+    if not present and brand:
+        entries.append((f"{brand} (you)", 0))
+
+    label_w, gap, bar_max, val_w = 210, 10, 320, 46
+    row_h, pad_t, pad_b = 34, 10, 8
+    bar_x = label_w + gap
+    width = bar_x + bar_max + val_w
+    height = pad_t + len(entries) * row_h + pad_b
+
+    def _short(d, lim=28):
+        return d if len(d) <= lim else d[: lim - 1] + "…"
+
+    color = {3: "#176874", 2: "#2DA5B6", 1: "#9AD0D9", 0: "#D43747"}
+    bars = []
+    for i, (name, cnt) in enumerate(entries):
+        y = pad_t + i * row_h
+        cy = y + row_h / 2
+        bw = max(6, bar_max * (cnt / 3))
+        is_you = cnt == 0
+        lblcls = "svglbl you" if is_you else "svglbl"
+        bars.append(
+            f"<text x='{label_w}' y='{cy:.0f}' dominant-baseline='central' "
+            f"text-anchor='end' class='{lblcls}'>{_esc(_short(name))}</text>"
+            f"<rect x='{bar_x}' y='{y + 7}' width='{bw:.1f}' height='{row_h - 14}' "
+            f"rx='5' fill='{color.get(cnt, '#2DA5B6')}'></rect>"
+            f"<text x='{bar_x + bw + 8:.1f}' y='{cy:.0f}' dominant-baseline='central' "
+            f"class='svgval'>{cnt}/3</text>"
+        )
+    svg = (f"<svg viewBox='0 0 {width} {height}' class='dchart' role='img' "
+           f"preserveAspectRatio='xMinYMin meet'>{''.join(bars)}</svg>")
+    sub = (f"How many of the three systems (ChatGPT, Claude, and our surrogate) "
+           f"recommend each brand for {_esc(category)}. "
+           + (f"{_esc(brand)} appears in none."
+              if not present and brand else
+              f"Higher means stronger cross-AI consensus."))
+    return (
+        "<div class='chart'>"
+        "<div class='charthd'>Which brands the AI systems agree on</div>"
+        f"<div class='chartsub'>{sub}</div>{svg}</div>"
+    )
+
+
+def graph_panels(record: dict) -> list[str]:
+    """Registry: return the HTML for every graph applicable to this run, in
+    display order. Always-on graphs render for any question; conditional ones
+    return '' when their data isn't rich enough."""
+    sysd = record.get("systems", {})
+    matches = record.get("matches", {})
+    brand = record.get("brand", "")
+    cat = f"“{record.get('question', 'this query')}”"
+    panels = [
+        brand_visibility_html(sysd, matches, brand, category=cat),
+        domain_authority_html(sysd.get("openai", {}).get("urls"),
+                              sysd.get("claude", {}).get("urls"), category=cat),
+    ]
+    return [p for p in panels if p]
+
+
+CHART_CSS = """
+.charts-row { display:flex; gap:1.2rem; flex-wrap:wrap; align-items:flex-start; margin:1.4rem 0; }
+.charts-row > .chart { flex:1 1 380px; min-width:300px; margin:0; }
+.chart { margin:1.4rem 0; padding:1.1rem 1.3rem; background:var(--soft);
+         border:1px solid var(--line); border-radius:12px; }
+.charthd { font-family:'Epilogue',sans-serif; font-weight:600; font-size:1.18rem; margin-bottom:.25rem; }
+.chartsub { color:#6B6B6B; font-size:.85rem; margin-bottom:1rem; max-width:660px; }
+.dchart { width:100%; height:auto; display:block; }
+.dchart .svglbl { fill:#444; font-size:13px; font-family:'Mulish',sans-serif; }
+.dchart .svglbl.you { fill:#B02A38; font-weight:700; }
+.dchart .svgval { fill:#176874; font-size:13px; font-weight:700; font-family:'Mulish',sans-serif; }
 """
 
 

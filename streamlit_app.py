@@ -205,9 +205,9 @@ with st.sidebar:
         mode = st.selectbox(
             "Mode",
             [
-                "Compare — surrogate vs ChatGPT + Claude",
-                "Surrogate — 7-tool deep-research agent",
-                "Retrieve only — search ingested docs",
+                "Compare · surrogate vs ChatGPT + Claude",
+                "Surrogate · 7-tool deep-research agent",
+                "Retrieve only · search ingested docs",
             ],
             help=(
                 "Compare: the brand-visibility demo (3 systems in parallel). "
@@ -221,7 +221,7 @@ with st.sidebar:
         value=True,
         help=(
             "ON by default: renders the Compare results from canned data (a "
-            "real past run), no model calls — ideal for demos and when the GPU "
+            "real past run), no model calls. Ideal for demos and when the GPU "
             "box is down. Turn OFF to run the question live."
         ),
     )
@@ -349,12 +349,12 @@ if page == "Ask":
                 st.stop()
             if test_mode:
                 st.info(
-                    "Test mode — rendering canned results from a real past "
+                    "Test mode: rendering canned results from a real past "
                     "run. No model is called."
                 )
             else:
                 st.info(
-                    "Running the same question through three systems in parallel — "
+                    "Running the same question through three systems in parallel: "
                     "the surrogate (needs vLLM at localhost:8000), ChatGPT (gpt-5 + "
                     "web_search) and Claude (web_search + extended thinking). "
                     "Typically 3–5 minutes."
@@ -396,11 +396,11 @@ if page == "Ask":
                     with open("data/demo_fixture.json") as f:
                         rec = _json.load(f)
                 except FileNotFoundError:
-                    st.error("data/demo_fixture.json missing — run "
+                    st.error("data/demo_fixture.json missing. Run "
                              "`python scripts/build_demo_fixture.py` once to create it.")
                     st.stop()
             else:
-                with st.spinner("Comparing — surrogate + 2 frontiers in parallel…"):
+                with st.spinner("Comparing: surrogate + 2 frontiers in parallel…"):
                     try:
                         rec = compare_run(q, brand=brand.strip() or "Avea",
                                           status_cb=_status)
@@ -464,33 +464,25 @@ if page == "Ask":
             card.append("</ul></div>")
             st.markdown("".join(card), unsafe_allow_html=True)
 
-            # --- transparency timeline (how the surrogate reached this) --------
-            # Rendered as an isolated HTML component so the click-to-reveal
-            # interaction works (st.markdown strips the onclick JS). Shares the
-            # exact renderer with the static demo via surrogate.demo_render.
+            # --- graph panels (brand visibility + domain authority …) ---------
+            from surrogate.demo_render import graph_panels, CHART_CSS
+            _panels = graph_panels(rec)
+            if _panels:
+                st.markdown(
+                    f"<style>{CHART_CSS}</style>"
+                    f"<div class='charts-row'>{''.join(_panels)}</div>",
+                    unsafe_allow_html=True,
+                )
+
+            # Surrogate trajectory is rendered lower (just before the full
+            # answers) — it's dense, surrogate-specific detail. Captured here
+            # because the answers section references `traj` for its dedup note.
             traj = rec["systems"]["surrogate"].get("trajectory") or []
-            if traj:
-                import streamlit.components.v1 as _components
-                from surrogate.demo_render import (
-                    trajectory_component_html, estimate_height,
-                )
-                st.markdown("### How our surrogate reached this")
-                st.caption(
-                    "Every step the model took — its live reasoning bound to the "
-                    "action it triggered. Click any highlighted phrase to reveal "
-                    "the exact sources the model pulled. The frontier models "
-                    "don't expose this."
-                )
-                _components.html(
-                    trajectory_component_html(traj),
-                    height=estimate_height(traj),
-                    scrolling=True,
-                )
 
             # --- deeper suggestions (rubric-driven analyst output) -------------
             deep = rec.get("deep")
             if deep:
-                with st.expander("Deeper suggestions — competitive gaps, "
+                with st.expander("Deeper suggestions: competitive gaps, "
                                  "priority plan, rival deep-dive", expanded=False):
                     st.markdown(deep.get("summary", ""))
 
@@ -510,7 +502,7 @@ if page == "Ask":
 
                     plan = deep.get("priority_plan") or []
                     if plan:
-                        st.markdown("#### Do this first — priority order")
+                        st.markdown("#### Do this first, in priority order")
                         for p in sorted(plan, key=lambda x: x.get("rank", 99)):
                             st.markdown(
                                 f"**{p.get('rank', '?')}.** {p.get('action', '')}  \n"
@@ -554,15 +546,26 @@ if page == "Ask":
                         st.error(s["error"])
                         continue
                     st.write(s.get("answer") or "(empty)")
-                    if s.get("thinking"):
-                        # Surrogate reasoning is shown step-by-step (with its
-                        # sources) in the timeline above — don't dump it again.
-                        if key == "surrogate" and traj:
-                            st.caption("↑ Step-by-step reasoning with sources is "
-                                       "in the timeline above.")
-                        else:
-                            st.markdown("**Reasoning (verbatim):**")
-                            st.text(s["thinking"])
+                    # Surrogate's "reasoning" is the interactive step-by-step
+                    # trajectory (click a phrase → sources). Rendered as an
+                    # isolated HTML component so the click JS works. Frontiers
+                    # show their verbatim thinking (no source binding possible).
+                    if key == "surrogate" and traj:
+                        import streamlit.components.v1 as _components
+                        from surrogate.demo_render import (
+                            trajectory_component_html, estimate_height,
+                        )
+                        st.markdown("**Reasoning, step by step, with sources** "
+                                    "(click a highlighted phrase to see what that "
+                                    "step pulled):")
+                        _components.html(
+                            trajectory_component_html(traj),
+                            height=estimate_height(traj),
+                            scrolling=True,
+                        )
+                    elif s.get("thinking"):
+                        st.markdown("**Reasoning (verbatim):**")
+                        st.text(s["thinking"])
         else:
             # New single-stage ReAct loop with the 7-tool engineered workflow.
             try:
