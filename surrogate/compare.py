@@ -662,6 +662,178 @@ def counterfactual_run(question: str, brand: str, blurb: str, anchor: str,
     }
 
 
+# ---- classic Google rank (#6) ----------------------------------------------
+# Contrast the AI-visibility picture with where each brand's OWN website ranks
+# in classic Google search for the same query. Deterministic, code-driven: one
+# Serper call (real Google organic positions) + string-based brand→domain
+# matching. If a brand's site isn't in the top `depth` results we report it as
+# "not ranking" (position=None) — never a fabricated number.
+
+# Generic words to strip when deriving a brand's distinctive token(s). Mirrors
+# _heuristic_brand_homes but kept separate so each can evolve independently.
+_BRAND_GENERIC = {
+    "the", "by", "and", "co", "inc", "ag", "gmbh", "ltd", "llc",
+    "life", "labs", "lab", "health", "nutrition", "nutra", "bio",
+    "supplements", "supplement", "vitamins", "vitamin", "solutions",
+    "swiss", "official", "shop", "store", "get", "try", "company",
+}
+
+
+def _fold(s: str) -> str:
+    """Lowercase + strip accents so 'Dünner' -> 'dunner' (avoids the collapse
+    dropping 'ü' and leaving a garbage fragment like 'nner')."""
+    import unicodedata
+    nf = unicodedata.normalize("NFKD", str(s).lower())
+    return "".join(c for c in nf if not unicodedata.combining(c))
+
+
+def _brand_tokens(brand: str) -> list[str]:
+    """Distinctive lowercase tokens of a brand name (generic words dropped)."""
+    toks = [t for t in re.split(r"[^a-z0-9]+", _fold(brand)) if t]
+    distinctive = [t for t in toks if t not in _BRAND_GENERIC]
+    return distinctive or toks
+
+
+def _brand_matches_domain(brand: str, domain: str) -> bool:
+    """True if `domain` plausibly is `brand`'s own website. We compare against
+    the second-level domain label only (e.g. 'swissherbs' in
+    'swissherbs.com', 'usnews' in 'health.usnews.com') so generic path/host
+    fragments like 'health' don't cause false matches. A brand matches when the
+    label equals/contains its collapsed name, or contains all of its distinctive
+    (non-generic, len>=4) tokens — which keeps 'Swiss Energy' off 'swisse.us'."""
+    bc = _collapse(_fold(brand))
+    host = _fold(domain).strip()
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [p for p in host.split(".") if p]
+    if not bc or len(parts) < 2:
+        return False
+    core = _collapse(parts[-2])  # the registrable label, e.g. "swissherbs"
+    if not core:
+        return False
+    if core == bc or bc in core:
+        return True
+    toks = [t for t in _brand_tokens(brand) if len(t) >= 4]
+    return bool(toks) and all(t in core for t in toks)
+
+
+def _mention_phrases(brand: str) -> list[str]:
+    """Candidate regexes (word-boundaried, whitespace-flexible) that a result's
+    title/snippet must contain to count as *naming* the brand. We try the full
+    name and a 'core' that drops trailing generic words ('Swiss Energy Vitamins'
+    -> also 'Swiss Energy'), so a snippet saying 'Swiss Energy' still counts —
+    while a bare common token like 'energy' alone never does."""
+    full = [t for t in re.split(r"[^a-z0-9]+", _fold(brand)) if t]
+    if not full:
+        return []
+    core = list(full)
+    while len(core) > 1 and core[-1] in _BRAND_GENERIC:
+        core.pop()
+    phrases = []
+    for toks in ([full, core] if core != full else [full]):
+        if sum(len(t) for t in toks) < 4:   # too short/generic to be safe
+            continue
+        phrases.append(r"\b" + r"\W+".join(re.escape(t) for t in toks) + r"\b")
+    return phrases
+
+
+def _brand_mentioned_in(brand: str, text: str) -> bool:
+    """True if `text` (a result title/snippet) names the brand."""
+    folded = _fold(text)
+    return any(re.search(p, folded) for p in _mention_phrases(brand))
+
+
+def classic_rank(
+    question: str,
+    brands: list[str],
+    *,
+    brand: str = "",
+    depth: int = 100,
+) -> dict | None:
+    """Where does each brand's own website rank in classic Google search for
+    `question`? Returns a dict (engine, label, depth, results_count, ranks) or
+    None if no search engine is configured.
+
+    `ranks` is a list of {brand, position, url, mention, mention_url}:
+      - position/url: rank of the brand's OWN website (None if absent).
+      - mention/mention_url: rank of the first result (any source — a listicle,
+        review, etc.) whose title/snippet NAMES the brand (None if absent).
+    Both are 1-based absolute SERP ranks. Serper serves 10 results/page, so `depth` is
+    fetched across ceil(depth/10) pages in parallel (1 credit each). The tracked
+    `brand` is always included even when it has no picks.
+    """
+    import os
+    from surrogate.tools.search import _serper_raw, _tavily_raw
+
+    if os.environ.get("SERPER_API_KEY"):
+        engine, label = "serper", "Google"
+        pages = max(1, -(-depth // 10))  # ceil
+        rows = []
+        with ThreadPoolExecutor(max_workers=min(pages, 5)) as ex:
+            futs = {ex.submit(_serper_raw, question, 10, p): p
+                    for p in range(1, pages + 1)}
+            page_rows = {}
+            for f in futs:
+                try:
+                    page_rows[futs[f]] = f.result() or []
+                except Exception:
+                    page_rows[futs[f]] = []
+        for p in range(1, pages + 1):
+            rows.extend(page_rows.get(p, []))
+        rows = rows[:depth]
+    elif os.environ.get("TAVILY_API_KEY"):
+        # Tavily caps low and ranks by its own index, so label it honestly.
+        engine, label = "tavily", "web search"
+        rows = _tavily_raw(question, min(depth, 20))
+    else:
+        return None
+
+    # dedup the brand list (tracked brand first), preserving display names
+    want: list[str] = []
+    seen: set[str] = set()
+    for b in ([brand] if brand else []) + list(brands or []):
+        b = (b or "").strip()
+        ck = _collapse(b)
+        if not ck or ck in seen:
+            continue
+        seen.add(ck)
+        want.append(b)
+
+    # precompute per result, in rank order: position, domain, url, and the
+    # title+snippet text used for mention detection.
+    indexed = []
+    for i, r in enumerate(rows):
+        pos = r.get("position") or (i + 1)
+        text = f"{r.get('title') or ''} {r.get('snippet') or ''}"
+        indexed.append((pos, _domain_of(r.get("url") or ""),
+                        r.get("url") or "", text))
+
+    ranks = []
+    for b in want:
+        # own-site rank: first result whose domain is the brand's homepage
+        own = next(((p, u) for p, d, u, _t in indexed
+                    if _brand_matches_domain(b, d)), None)
+        # mention rank: first result (any source) whose title/snippet names it
+        mention = next(((p, u) for p, _d, u, t in indexed
+                        if _brand_mentioned_in(b, t)), None)
+        ranks.append({
+            "brand": b,
+            "position": own[0] if own else None,
+            "url": own[1] if own else None,
+            "mention": mention[0] if mention else None,
+            "mention_url": mention[1] if mention else None,
+        })
+
+    return {
+        "engine": engine,
+        "label": label,
+        "query": question,
+        "depth": depth,
+        "results_count": len(rows),
+        "ranks": ranks,
+    }
+
+
 # ---- the 3-way run ----------------------------------------------------------
 
 def compare_run(
@@ -794,6 +966,15 @@ def compare_run(
     deep = deep_suggestions(question, brand, results, matches, brief)
     _notify("deep", "done" if deep else "error: analysis unavailable")
 
+    # ---- classic Google rank vs AI visibility (#6) ----------------------------
+    # One Serper call; deterministic. Brands = union of all systems' picks.
+    all_picks = [it for n in workers for it in (results[n]["ranked"] or [])]
+    try:
+        classic = classic_rank(question, all_picks, brand=brand)
+    except Exception as e:
+        classic = None
+        errors["classic_rank"] = f"{type(e).__name__}: {e}"
+
     record = {
         "ts": datetime.now(timezone.utc).isoformat(),
         "question": question,
@@ -804,6 +985,7 @@ def compare_run(
         "matches": matches,
         "suggestions": brief,
         "deep": deep,
+        "classic_rank": classic,
         "errors": errors,
     }
 

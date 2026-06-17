@@ -277,25 +277,24 @@ def domain_authority_html(openai_urls, claude_urls, *, top_n: int = 8,
     return (
         "<div class='chart'>"
         f"<div class='charthd'>Where AI looks when answering {_esc(category)}</div>"
-        f"<div class='chartsub'>Domains {who} cited to build "
-        "their answers, ranked by frequency. These are the sources a brand needs "
-        "to appear on to get recommended.</div>"
+        f"<div class='chartsub'>Domains {who} cited, ranked by frequency — "
+        "the sources a brand needs to appear on to get recommended.</div>"
         f"{svg}</div>"
     )
 
 
-def brand_visibility_html(systems: dict, matches: dict, brand: str,
-                          *, top_n: int = 9, category: str = "this") -> str:
-    """Bar chart: how many of the 3 systems surface each brand (0–3), brands
-    clustered across systems via the judge's matched pairs. The tracked brand
-    is pinned (red) if no system surfaced it. Always computable from a run."""
+def _brand_consensus(systems: dict, matches: dict, *, top_n: int = 9) -> list[tuple]:
+    """Cluster brands across the 3 systems via the judge's matched pairs and
+    count how many systems surface each (0–3). Returns [(display_name, count)]
+    sorted by count desc then name, capped at top_n. Shared by the brand-
+    visibility chart and the classic-rank panel so both show the same brands."""
     lists = {
         "surrogate": systems.get("surrogate", {}).get("ranked") or [],
         "openai": systems.get("openai", {}).get("ranked") or [],
         "claude": systems.get("claude", {}).get("ranked") or [],
     }
     if not any(lists.values()):
-        return ""
+        return []
 
     parent: dict = {}
     info: dict = {}
@@ -349,7 +348,23 @@ def brand_visibility_html(systems: dict, matches: dict, brand: str,
         nk = name.strip().lower()
         if nk not in best or cnt > best[nk][1]:
             best[nk] = (name, cnt)
-    entries = sorted(best.values(), key=lambda e: (-e[1], e[0].lower()))[:top_n]
+    return sorted(best.values(), key=lambda e: (-e[1], e[0].lower()))[:top_n]
+
+
+def brand_visibility_html(systems: dict, matches: dict, brand: str,
+                          *, top_n: int = 9, category: str = "this") -> str:
+    """Bar chart: how many of the 3 systems surface each brand (0–3), brands
+    clustered across systems via the judge's matched pairs. The tracked brand
+    is pinned (red) if no system surfaced it. Always computable from a run."""
+    lists = {
+        "surrogate": systems.get("surrogate", {}).get("ranked") or [],
+        "openai": systems.get("openai", {}).get("ranked") or [],
+        "claude": systems.get("claude", {}).get("ranked") or [],
+    }
+    if not any(lists.values()):
+        return ""
+
+    entries = _brand_consensus(systems, matches, top_n=top_n)
 
     # tracked brand: present in any list?
     present = any(brand.lower() in str(it).lower()
@@ -384,11 +399,10 @@ def brand_visibility_html(systems: dict, matches: dict, brand: str,
         )
     svg = (f"<svg viewBox='0 0 {width} {height}' class='dchart' role='img' "
            f"preserveAspectRatio='xMinYMin meet'>{''.join(bars)}</svg>")
-    sub = (f"How many of the three systems (ChatGPT, Claude, and our surrogate) "
-           f"recommend each brand for {_esc(category)}. "
+    sub = (f"How many of the three AI systems recommend each brand. "
            + (f"{_esc(brand)} appears in none."
               if not present and brand else
-              f"Higher means stronger cross-AI consensus."))
+              f"Higher means stronger agreement."))
     return (
         "<div class='chart'>"
         "<div class='charthd'>Which brands the AI systems agree on</div>"
@@ -432,11 +446,92 @@ def counterfactual_html(record: dict) -> str:
     return (
         "<div class='chart cf'>"
         f"<div class='charthd'>What if {brand} were listed on {anchor}?</div>"
-        f"<div class='chartsub'>A projection. We re-asked each model assuming "
-        f"{brand} appears on {anchor}, grounded in {brand}'s real published data, "
-        f"and told it to include {brand} only if it genuinely ranks. "
-        f"Before vs after:</div>"
+        f"<div class='chartsub'>A projection: we re-asked each model assuming "
+        f"{brand} appears on {anchor}, using {brand}'s real data, and to include "
+        f"it only if it genuinely ranks.</div>"
         f"<table class='cftab'>{''.join(rows)}</table></div>"
+    )
+
+
+def _collapse(s) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+
+def _google_field_for(name: str, ranks: list[dict], field: str):
+    """Best (lowest) value of `field` ('position' or 'mention') among
+    classic_rank entries whose brand collapse-matches `name`. None if absent."""
+    nc = _collapse(name)
+    if not nc:
+        return None
+    found = [r[field] for r in ranks
+             if (rc := _collapse(r.get("brand", "")))
+             and (nc in rc or rc in nc) and r.get(field)]
+    return min(found) if found else None
+
+
+def classic_search_html(record: dict) -> str:
+    """#6 — how each AI-recommended brand fares in classic Google search, two
+    ways: where its OWN website ranks, and where it is first NAMED by any source
+    (a listicle, review, etc.). Returns '' when no classic_rank block is present.
+    Deterministic. Brands come from the same consensus clustering as the
+    visibility chart, so the panels line up. The point: a brand a buyer reaches
+    via Google only through third-party articles — if at all — versus how AI
+    names it directly (shown in the visibility chart)."""
+    cr = record.get("classic_rank")
+    if not cr or not cr.get("ranks"):
+        return ""
+    systems = record.get("systems", {})
+    matches = record.get("matches", {})
+    brand = record.get("brand", "")
+    label = cr.get("label", "Google")      # "Google" or "web search"
+    depth = cr.get("results_count") or cr.get("depth", 100)
+    bc_track = _collapse(brand)
+
+    # Brand set = top consensus brands PLUS any AI-recommended brand that
+    # actually shows up in Google (own site or mention), so the Google-visible
+    # ones are never cut by the consensus cap. Consensus gives deduped names.
+    consensus = _brand_consensus(systems, matches, top_n=50)
+    rows = []
+    for i, (name, _cnt) in enumerate(consensus):
+        own = _google_field_for(name, cr["ranks"], "position")
+        men = _google_field_for(name, cr["ranks"], "mention")
+        if i < 12 or own or men:
+            rows.append((name, own, men,
+                         bool(bc_track) and bc_track in _collapse(name)))
+    # tracked brand: ensure a row even if no system surfaced it
+    if bc_track and not any(r[3] for r in rows):
+        rows.append((brand,
+                     _google_field_for(brand, cr["ranks"], "position"),
+                     _google_field_for(brand, cr["ranks"], "mention"),
+                     True))
+
+    # sort by own-site rank, then first-mention rank; absent sinks to the bottom
+    def sort_key(row):
+        _, own, men, _t = row
+        return (0 if own else 1, own or 10**6, 0 if men else 1, men or 10**6)
+    rows.sort(key=sort_key)
+
+    def cell(pos):
+        return (f"<span class='cr-rank'>#{pos}</span>" if pos
+                else f"<span class='cr-none'>— not in top {depth}</span>")
+
+    trs = ["<tr><th>Brand</th><th>Own website</th><th>First mentioned</th></tr>"]
+    for name, own, men, is_track in rows:
+        nm = _esc(name) + (" <span class='cr-you'>(you)</span>" if is_track else "")
+        cls = " class='cr-track'" if is_track else ""
+        trs.append(f"<tr{cls}><td>{nm}</td><td>{cell(own)}</td><td>{cell(men)}</td></tr>")
+
+    engine_note = ("real Google organic positions" if cr.get("engine") == "serper"
+                   else "web-search ranking, Google-class index")
+    sub = (f"Where each AI-recommended brand appears in {_esc(label)} for this "
+           f"query ({engine_note}, top {depth}). <b>Own website</b>: where its "
+           f"own site ranks. <b>First mentioned</b>: the first article that names "
+           f"it. A dash means neither.")
+    return (
+        "<div class='chart'>"
+        f"<div class='charthd'>Where these brands appear in classic {_esc(label)} search</div>"
+        f"<div class='chartsub'>{sub}</div>"
+        f"<table class='cftab crtab'>{''.join(trs)}</table></div>"
     )
 
 
@@ -452,6 +547,7 @@ def graph_panels(record: dict) -> list[str]:
         brand_visibility_html(sysd, matches, brand, category=cat),
         domain_authority_html(sysd.get("openai", {}).get("urls"),
                               sysd.get("claude", {}).get("urls"), category=cat),
+        classic_search_html(record),
     ]
     return [p for p in panels if p]
 
@@ -474,6 +570,13 @@ CHART_CSS = """
 .cf-yes { color:#1B8090; font-weight:700; }
 .cf-mid { color:#176874; }
 .cf-no { color:#9a9a9a; }
+.crtab .cr-rank { color:#176874; font-weight:700; }
+.crtab .cr-none { color:#9a9a9a; }
+.crtab .cr-ai { font-weight:700; color:#444; }
+.crtab .cr-dot { display:inline-block; width:.62rem; height:.62rem; border-radius:50%;
+                 margin-right:.4rem; vertical-align:middle; }
+.crtab tr.cr-track td { background:rgba(212,55,71,.07); font-weight:600; }
+.crtab .cr-you { color:#B02A38; font-weight:700; font-size:.8rem; }
 """
 
 

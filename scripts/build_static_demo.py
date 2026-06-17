@@ -294,11 +294,24 @@ _TEMPLATE = """<!DOCTYPE html>
   <input type="text" id="q" value="{question}" />
   <label class="q" for="b" style="margin-top:1rem;">Brand to track</label>
   <input type="text" id="b" value="Avea" />
-  <button class="btn" onclick="document.getElementById('results').style.display='block';
-          this.scrollIntoView({{behavior:'smooth'}});">Run</button>
+  <button class="btn" type="button" id="runbtn">Run</button>
 
   <div id="results">{results}</div>
 </div>
+<script>
+/* Run button: bound here in its own script so a later error can't disable it,
+   and with a guarded plain scroll (iOS WebKit can throw on the options form). */
+(function(){{
+  var b=document.getElementById('runbtn');
+  if(!b) return;
+  b.addEventListener('click', function(){{
+    var r=document.getElementById('results');
+    if(r) r.style.display='block';
+    try{{ b.scrollIntoView({{behavior:'smooth'}}); }}
+    catch(e){{ try{{ b.scrollIntoView(); }}catch(_){{}} }}
+  }});
+}})();
+</script>
 {overlay}
 <script>{traj_js}</script>
 </body></html>

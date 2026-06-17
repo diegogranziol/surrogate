@@ -2956,5 +2956,210 @@
         "hit": null
       }
     }
+  },
+  "classic_rank": {
+    "engine": "serper",
+    "label": "Google",
+    "query": "What are the top 10 Swiss supplement brands?",
+    "depth": 100,
+    "results_count": 100,
+    "ranks": [
+      {
+        "brand": "Avea",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "SFI Health Solutions",
+        "position": null,
+        "url": null,
+        "mention": 6,
+        "mention_url": "https://ensun.io/search/supplement/switzerland"
+      },
+      {
+        "brand": "Nestlé Health Science",
+        "position": null,
+        "url": null,
+        "mention": 6,
+        "mention_url": "https://ensun.io/search/supplement/switzerland"
+      },
+      {
+        "brand": "BE THE CHANGE",
+        "position": null,
+        "url": null,
+        "mention": 64,
+        "mention_url": "https://www.vitalabo.ch/en-CH/info/magazine/be-the-change-top-nutritional-supplements-from-switzerland"
+      },
+      {
+        "brand": "Swiss Herbs",
+        "position": 3,
+        "url": "https://swissherbs.com/?srsltid=AfmBOopcjGLx9ddiyJPqtbkK76kq3dwfqiLV_8sk_xcHiw4tD-aO_AC4",
+        "mention": 3,
+        "mention_url": "https://swissherbs.com/?srsltid=AfmBOopcjGLx9ddiyJPqtbkK76kq3dwfqiLV_8sk_xcHiw4tD-aO_AC4"
+      },
+      {
+        "brand": "Swilab",
+        "position": 19,
+        "url": "https://swilab.ch/en/?srsltid=AfmBOor9fe66D-gkYCVWE0pG2qIoXp8JpkzHOsaKL97Y_mAFTQk-5qAV",
+        "mention": 19,
+        "mention_url": "https://swilab.ch/en/?srsltid=AfmBOor9fe66D-gkYCVWE0pG2qIoXp8JpkzHOsaKL97Y_mAFTQk-5qAV"
+      },
+      {
+        "brand": "Swiss Alp Health",
+        "position": 68,
+        "url": "https://swiss-alp-health.ch/en/",
+        "mention": 68,
+        "mention_url": "https://swiss-alp-health.ch/en/"
+      },
+      {
+        "brand": "Hochdorf Swiss Nutrition AG",
+        "position": null,
+        "url": null,
+        "mention": 14,
+        "mention_url": "https://www.surfe.com/industries/nutrition/switzerland-013/"
+      },
+      {
+        "brand": "Swiss Energy Vitamins",
+        "position": 25,
+        "url": "https://swissenergy-vitamins.com/",
+        "mention": 25,
+        "mention_url": "https://swissenergy-vitamins.com/"
+      },
+      {
+        "brand": "Sponser",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "SwissRX",
+        "position": 32,
+        "url": "https://swissrx.com/",
+        "mention": 16,
+        "mention_url": "https://thefeed.com/insider/the-swissrx-story-the-worlds-1-supplement-brand?srsltid=AfmBOoq9fk0Zt3pTG0vE8OUAhqcQZhjdVfP3c9cwCA16lnfvq7uEy9gO"
+      },
+      {
+        "brand": "Burgerstein Vitamine",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "A.Vogel",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Bio-Strath",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "SPONSER Sport Food",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Dr.Dünner",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Alpinamed",
+        "position": null,
+        "url": null,
+        "mention": 64,
+        "mention_url": "https://www.vitalabo.ch/en-CH/info/magazine/be-the-change-top-nutritional-supplements-from-switzerland"
+      },
+      {
+        "brand": "Max Zeller Söhne",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Nahrin",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Biomed",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Phytopharma",
+        "position": null,
+        "url": null,
+        "mention": 92,
+        "mention_url": "https://beautylion.ch/collections/supplements-swiss-wellness-essentials?srsltid=AfmBOopi4cSH51NC_StnKxUYdX71N4U611hhhjDbJZNgGAZ4kz3I44UC"
+      },
+      {
+        "brand": "Lonza",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "NUTRASWISS",
+        "position": null,
+        "url": null,
+        "mention": 62,
+        "mention_url": "https://profeel.life/en/collections/supplements"
+      },
+      {
+        "brand": "Kingnature",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Nahrin AG",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Swiss Energy",
+        "position": 25,
+        "url": "https://swissenergy-vitamins.com/",
+        "mention": 25,
+        "mention_url": "https://swissenergy-vitamins.com/"
+      },
+      {
+        "brand": "Biomed AG",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      },
+      {
+        "brand": "Sekoya",
+        "position": null,
+        "url": null,
+        "mention": null,
+        "mention_url": null
+      }
+    ]
   }
 }

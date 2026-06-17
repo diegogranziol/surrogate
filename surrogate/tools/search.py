@@ -1,16 +1,21 @@
 """Multi-engine web search with fan-out + URL dedup.
 
-Default behaviour (WEB_SEARCH_MODE=multi, the default): query Tavily and
-DuckDuckGo in parallel, merge results, dedup by URL, interleave so each
-engine gets fair representation in the top of the list the LLM sees. This
-broadens the evidence pool — Tavily indexes Google-class sources, DDG
-indexes Bing-class sources, so the surrogate sees URLs the frontiers see
+Default behaviour (WEB_SEARCH_MODE=multi, the default): query one Google-class
+engine and DuckDuckGo in parallel, merge results, dedup by URL, interleave so
+each engine gets fair representation in the top of the list the LLM sees. This
+broadens the evidence pool — the Google-class engine indexes Google sources,
+DDG indexes Bing-class sources, so the surrogate sees URLs the frontiers see
 on either side.
 
-Backward-compat: WEB_SEARCH_MODE=single picks the highest-priority engine,
-matching the old behaviour (SerpAPI > Tavily > DDG).
+The Google-class engine is Serper (real Google SERP) when SERPER_API_KEY is
+set, otherwise Tavily as a backup. Serper is preferred because it returns true
+Google organic positions (used by the classic-rank feature).
 
-Each engine adapter returns `list[dict]` with keys {title, url, snippet}.
+Backward-compat: WEB_SEARCH_MODE=single picks the highest-priority engine,
+matching the old behaviour (Serper > SerpAPI > Tavily > DDG).
+
+Each engine adapter returns `list[dict]` with keys {title, url, snippet} and,
+where the engine exposes it, an integer `position` (true SERP rank).
 The public `web_search()` returns the same numbered-list string format the
 rest of the loop expects.
 """
@@ -176,6 +181,8 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     if mode == "single":
         # Old behaviour: pick the highest-priority engine.
+        if os.environ.get("SERPER_API_KEY"):
+            return _format_results(_serper_raw(query, max_results))
         if os.environ.get("SERPAPI_API_KEY"):
             return _format_results(_serpapi_raw(query, max_results))
         if os.environ.get("TAVILY_API_KEY"):
@@ -183,8 +190,13 @@ def web_search(query: str, max_results: int = 5) -> str:
         return _format_results(_ddg_raw(query, max_results))
 
     # multi mode: fan-out, merge, dedup, interleave.
+    # Google-class slot: Serper (real Google SERP) first, Tavily as backup.
+    # Both index Google-class sources, so running both is redundant — we pick
+    # one and pair it with DDG (Bing-class) for evidence breadth.
     engines: list[tuple[str, callable]] = []
-    if os.environ.get("TAVILY_API_KEY"):
+    if os.environ.get("SERPER_API_KEY"):
+        engines.append(("serper", _serper_raw))
+    elif os.environ.get("TAVILY_API_KEY"):
         engines.append(("tavily", _tavily_raw))
     if os.environ.get("SERPAPI_API_KEY"):
         engines.append(("serpapi", _serpapi_raw))
@@ -257,6 +269,44 @@ def _tavily_raw(query: str, n: int) -> list[dict]:
             "title": res.get("title") or "",
             "url": res.get("url") or "",
             "snippet": (res.get("content") or "").strip().replace("\n", " "),
+        })
+    return items
+
+
+def _serper_raw(query: str, n: int, page: int = 1) -> list[dict]:
+    """Serper.dev Google engine. Needs SERPER_API_KEY. Returns real Google
+    organic results in rank order, including the integer `position`.
+
+    Serper serves 10 organic results per page; pass `page` (1-based) to read
+    deeper. `position` is page-local in the response, so we offset it to the
+    absolute SERP rank here."""
+    import httpx
+    r = httpx.post(
+        "https://google.serper.dev/search",
+        headers={
+            "X-API-KEY": os.environ["SERPER_API_KEY"],
+            "Content-Type": "application/json",
+        },
+        json={
+            "q": query,
+            "num": n,
+            "page": page,
+            "hl": os.environ.get("SERPER_HL", "en"),
+            "gl": os.environ.get("SERPER_GL", "us"),
+        },
+        timeout=20.0,
+    )
+    r.raise_for_status()
+    data = r.json()
+    base = (page - 1) * 10
+    items = []
+    for res in (data.get("organic") or [])[:n]:
+        pos = res.get("position")
+        items.append({
+            "title": res.get("title") or "",
+            "url": res.get("link") or "",
+            "snippet": (res.get("snippet") or "").strip().replace("\n", " "),
+            "position": (pos + base) if isinstance(pos, int) else None,
         })
     return items
 
