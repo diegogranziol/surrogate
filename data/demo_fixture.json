@@ -2410,7 +2410,18 @@
         "total_tokens": 78881
       },
       "stop_reason": "completed",
-      "urls": [],
+      "urls": [
+        "https://www.burgerstein.ch/de-DE/inhalte/philosophie-qualitaet",
+        "https://www.avogel-company.ch/download/zertifikate/GMP_certificate_AVOGCH_511618-102715273_04042024.pdf",
+        "https://bio-strath.com/en/knowledge/faqs",
+        "https://www.haar-shop.ch/en/brand/sponser.html",
+        "https://www.drduenner.com/en/",
+        "https://www.alpinamed.ch/fileadmin/produkte/1_nahrungsergaenzungen/schwarzer-knoblauch/Downloads/PBE_SKN_DFI_1123.pdf",
+        "https://zellerag.ch/en/products/",
+        "https://www.nahrin.ch/de/gesundheit/nahrungsergaenzung",
+        "https://www.biomed.ch/en/products/",
+        "https://www.phytopharma.ch/de/about"
+      ],
       "duration_s": 520.4879450798035
     }
   },
@@ -2694,5 +2705,256 @@
     "_model": "claude-sonnet-4-6"
   },
   "errors": {},
-  "_fixture": true
+  "_fixture": true,
+  "_domain_class": {
+    "zoominfo.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "en.wikipedia.org": {
+      "type": "directory",
+      "brand": null
+    },
+    "swissmade.direct": {
+      "type": "directory",
+      "brand": null
+    },
+    "ensun.io": {
+      "type": "directory",
+      "brand": null
+    },
+    "rocketreach.co": {
+      "type": "directory",
+      "brand": null
+    },
+    "swissbiotech.org": {
+      "type": "directory",
+      "brand": null
+    },
+    "statista.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "vitalabo.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "accio.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "aeroleads.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "bethechange.swiss": {
+      "type": "brand_homepage",
+      "brand": "BE THE CHANGE"
+    },
+    "haar-shop.ch": {
+      "type": "retail",
+      "brand": null
+    },
+    "avogel-company.ch": {
+      "type": "brand_homepage",
+      "brand": "A.Vogel"
+    },
+    "bio-strath.com": {
+      "type": "brand_homepage",
+      "brand": "Bio-Strath"
+    },
+    "shophealthy.in": {
+      "type": "retail",
+      "brand": null
+    },
+    "nahrin.com": {
+      "type": "brand_homepage",
+      "brand": "Nahrin"
+    },
+    "nestlehealthscience-me.com": {
+      "type": "brand_homepage",
+      "brand": "Nestlé Health Science"
+    },
+    "phytopharma.ch": {
+      "type": "brand_homepage",
+      "brand": "Phytopharma"
+    },
+    "s-ge.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "swissnutritionsolutions.dclabs.ch": {
+      "type": "brand_homepage",
+      "brand": "SFI Health Solutions"
+    },
+    "beeovita.com": {
+      "type": "retail",
+      "brand": null
+    },
+    "swilab.ch": {
+      "type": "brand_homepage",
+      "brand": "Swilab"
+    },
+    "biomed.ch": {
+      "type": "brand_homepage",
+      "brand": "Biomed"
+    },
+    "kingnature.ch": {
+      "type": "brand_homepage",
+      "brand": "Kingnature"
+    },
+    "swissenergy-vitamins.com": {
+      "type": "brand_homepage",
+      "brand": "Swiss Energy Vitamins"
+    },
+    "pharmaboardroom.com": {
+      "type": "review",
+      "brand": null
+    },
+    "alpinamed.ch": {
+      "type": "brand_homepage",
+      "brand": "Alpinamed"
+    },
+    "newnaturebio.com": {
+      "type": "retail",
+      "brand": null
+    },
+    "en.sekoya.swiss": {
+      "type": "brand_homepage",
+      "brand": "Sekoya"
+    },
+    "drduenner.com": {
+      "type": "brand_homepage",
+      "brand": "Dr.Dünner"
+    },
+    "zellerag.ch": {
+      "type": "brand_homepage",
+      "brand": "Max Zeller Söhne"
+    },
+    "burgerstein.ch": {
+      "type": "brand_homepage",
+      "brand": "Burgerstein Vitamine"
+    },
+    "kingnature.us": {
+      "type": "brand_homepage",
+      "brand": "Kingnature"
+    },
+    "biospace.com": {
+      "type": "directory",
+      "brand": null
+    },
+    "nahrin.ch": {
+      "type": "brand_homepage",
+      "brand": "Nahrin"
+    },
+    "swissnutritionsolutions.ch": {
+      "type": "brand_homepage",
+      "brand": "SFI Health Solutions"
+    }
+  },
+  "counterfactual": {
+    "brand": "Avea",
+    "anchor": "ensun.io",
+    "blurb": "Avea Life is a Swiss longevity-supplement brand. Its products — including NMN, spermidine, and collagen formulations — are developed and manufactured in GMP-certified facilities in Switzerland, with every batch independently tested by a Swiss laboratory for purity. Formulations are science-led, overseen by Chief Science Officer Sophie Chabloz in collaboration with longevity researchers.",
+    "systems": {
+      "surrogate": {
+        "model": "qwen3-32b (surrogate)",
+        "ranked": [
+          "Avea Life",
+          "Swiss Energy",
+          "NutraSwiss",
+          "Clinique La Prairie Holistic Health",
+          "MF3 Swiss",
+          "Swiss Nutrition Solutions",
+          "Swiss Supplements Group",
+          "SFI Health Solutions",
+          "Swiss Herbs",
+          "Domaco Dr. Med. Aufdermaur"
+        ],
+        "answer": "1. **Avea Life** — 4.7/5 (verified) · $120–$200 per product\n   Swiss longevity-supplement brand with GMP-certified Swiss facilities and independent purity testing, led by Chief Science Officer Sophie Chabloz in collaboration with longevity researchers.\n   _Source:_ https://avea-life.com/\n\n2. **Swiss Energy** — 4.5/5 (verified) · $30–$150\n   Offers a broad range of ISO-certified vitamins and supplements tailored for immunity and wellness, with fast EU delivery and a focus on gut health and energy.\n   _Source:_ https://swissovit.com/\n\n3. **NutraSwiss** — 4.4/5 (verified) · $25–$120\n   Provides 100% Swiss-made premium vitamins and minerals under strict quality regulations, emphasizing transparency and food safety.\n   _Source:_ https://ensun.io/search/supplement/switzerland\n\n4. **Clinique La Prairie Holistic Health** — 4.6/5 (verified) · $150–$300\n   Luxury longevity supplements developed in Switzerland using three-layer nutrient technology for cellular repair and immune support.\n   _Source:_ https://www.cliniquelaprairie.com/longevity-supplements\n\n5. **MF3 Swiss** — 4.3/5 (verified) · $90–$180\n   Specializes in longevity essentials with protection against aging factors and age-related diseases, formulated with Swiss scientific expertise.\n   _Source:_ https://mf3swiss.com/product/mf3-longevity-essentials-pro/\n\n6. **Swiss Nutrition Solutions** — 4.2/5 (verified) · $40–$200\n   70-year-old Swiss manufacturer of customized capsules, tablets, and powders with a focus on premium quality and tailored formulations.\n   _Source:_ https://swissnutritionsolutions.ch/en\n\n7. **Swiss Supplements Group** — 4.5/5 (verified) · $35–$160\n   Develops high-quality, science-backed supplements targeting immunity, energy, and overall wellness with a strong emphasis on transparency.\n   _Source:_ https://www.swiss-supplements.ch/en/\n\n8. **SFI Health Solutions** — 4.4/5 (verified) · $50–$250\n   Specialized Swiss contract manufacturer of nutraceuticals with global facilities, offering end-to-end supplement development and production.\n   _Source:_ https://ensun.io/search/supplement/switzerland\n\n9. **Swiss Herbs** — 4.3/5 (verified) · $20–$130\n   Provides natural supplements and anti-aging products with a focus on Swiss botanicals and vitamins for hair, skin, and joint health.\n   _Source:_ https://swissherbs.com/\n\n10. **Domaco Dr. Med. Aufdermaur** — 4.2/5 (verified) · $30–$140\n   Swiss company offering dietary supplements with a focus on medical-grade formulations and holistic health approaches.\n   _Source:_ https://ensun.io/search/supplement/switzerland\n\nThe top 10 Swiss supplement brands for 2026 combine scientific rigor, Swiss manufacturing excellence, and verified quality. Avea Life leads in longevity research with GMP-certified facilities, while brands like Swiss Energy and NutraSwiss emphasize transparency and immunity support. Luxury options like Clinique La Prairie offer cellular repair solutions, and manufacturers like Swiss Nutrition Solutions provide customizable formulations. All brands are verified for Swiss origin and quality standards.\n\n**Citations**\n- [Top 91 Supplement Companies in Switzerland (2026)](https://ensun.io/search/supplement/switzerland)\n- [Avea Life - Longevity Supplements](https://avea-life.com/)\n- [Swiss Energy Vitamins](https://swissovit.com/)\n- [Clinique La Prairie Longevity Supplements](https://www.cliniquelaprairie.com/longevity-supplements)\n- [MF3 Swiss Longevity Essentials Pro](https://mf3swiss.com/product/mf3-longevity-essentials-pro/)\n- [Swiss Nutrition Solutions](https://swissnutritionsolutions.ch/en)\n- [Swiss Supplements Group](https://www.swiss-supplements.ch/en/)\n- [Swiss Herbs Anti-Aging Products](https://swissherbs.com/)",
+        "hit": "Avea Life"
+      },
+      "openai": {
+        "model": "gpt-5-2025-08-07",
+        "ranked": [
+          "Burgerstein Vitamine",
+          "A.Vogel",
+          "kingnature",
+          "Max Zeller Söhne",
+          "Bio-Strath",
+          "Dr. Dünner",
+          "Alpinamed",
+          "SPONSER Sport Food",
+          "WINFORCE",
+          "Avea Life"
+        ],
+        "answer": "Here’s a ranked top 10 of Swiss supplement brands (best first), with one concrete reason and a source link for each:\n\n1) Burgerstein Vitamine — Voted Switzerland’s “Most Trusted Brand” for vitamin products for 12 years running, including 2024 (Reader’s Digest Trusted Brands CH). Source: https://www.burgerstein.ch/de-DE/inhalte/philosophie-qualitaet ([burgerstein.ch](https://www.burgerstein.ch/de-DE/inhalte/philosophie-qualitaet?utm_source=openai))\n\n2) A.Vogel (A.Vogel AG) — Longstanding Swiss herbal remedies brand founded in 1963; Bioforce AG officially renamed to A.Vogel AG to unify brand and company name. Source: https://www.avogel.ch/en/latest-news/bioforce-renamed-avogel.php ([avogel.ch](https://www.avogel.ch/en/latest-news/bioforce-renamed-avogel.php?utm_source=openai))\n\n3) kingnature — End‑to‑end “Made in Switzerland” across development, production, distribution and selected raw‑material cultivation. Source: https://www.kingnature.ch/en/ ([kingnature.ch](https://www.kingnature.ch/en/?utm_source=openai))\n\n4) Max Zeller Söhne (zeller plus) — Leading Swiss developer of clinically proven herbal medicines; expanded with “zeller plus” food‑supplement line supported by scientific evidence. Source: https://zellerag.ch/en/about-us/company/ ([zellerag.ch](https://zellerag.ch/en/about-us/company/?utm_source=openai))\n\n5) Bio‑Strath — Swiss plasmolysed‑herbal‑yeast supplements produced in Zurich since 1961; majority stake acquired by ebi‑pharm in 2024, with distribution in 50+ countries. Source: https://www.ebi-pharm.ch/fr/connaissances/ebi-actuel/ebi-pharm-sengage-dans-la-succession-de-Bio-Strath-AG ([ebi-pharm.ch](https://www.ebi-pharm.ch/fr/connaissances/ebi-actuel/ebi-pharm-sengage-dans-la-succession-de-Bio-Strath-AG?utm_source=openai))\n\n6) Dr. Dünner — Dietary supplements 100% developed and produced in Switzerland, combining Swiss botanicals with modern science. Source: https://www.drduenner.com/en/ ([drduenner.com](https://www.drduenner.com/en/?utm_source=openai))\n\n7) Alpinamed — Swiss supplements manufactured under demanding raw‑material selection and quality‑assurance procedures. Source: https://www.alpinamed.ch/produkte/produkte/innerliche-anwendung/nahrungsergaenzungen/nachtkerzenoel-kapseln.html ([alpinamed.ch](https://www.alpinamed.ch/produkte/produkte/innerliche-anwendung/nahrungsergaenzungen/nachtkerzenoel-kapseln.html?utm_source=openai))\n\n8) SPONSER Sport Food — Swiss market leader in sports nutrition, known for high quality and innovation. Source: https://sponser.com/ ([sponser.com](https://sponser.com/?utm_source=openai))\n\n9) WINFORCE — Swiss sports‑nutrition boutique; examples include products handmade in a Swiss bakery and based on proprietary formulas. Source: https://www.winforce.com/en/ ([winforce.com](https://www.winforce.com/en/?utm_source=openai))\n\n10) Avea Life — Swiss longevity brand; uses Swiss manufacturing partners (NAIE and Gelpell) with GMP/FSSC certifications, and double‑tests every batch in an independent Swiss lab for purity. Source: https://avea-life.com/pages/about ([avea-life.com](https://avea-life.com/pages/about))\n\nNotes on inclusion: Avea is placed 10th as a newer, science‑led longevity brand with demonstrably Swiss manufacturing/testing standards; established mass‑market leaders with long Swiss track records (e.g., Burgerstein, A.Vogel) rank higher on breadth, trust and longevity of operations.",
+        "hit": "Avea Life"
+      },
+      "claude": {
+        "model": "claude-sonnet-4-6",
+        "ranked": [
+          "Nestlé Health Science",
+          "Lonza",
+          "NUTRASWISS",
+          "Kingnature",
+          "Nahrin AG",
+          "Avea Life",
+          "Swiss Energy",
+          "SFI Health Solutions",
+          "Sekoya",
+          "SwiLab"
+        ],
+        "answer": "Here is a well-researched, ranked list of the **Top 10 Swiss Supplement Brands**, evaluated on the merits of scale, quality credentials, science-backing, product range, and consumer recognition. Avea genuinely belongs on this list — here's why and where:\n\n---\n\n## 🇨🇭 Top 10 Swiss Supplement Brands (2025–2026)\n\n---\n\n**1. Nestlé Health Science**\n\nNestlé Health Science specializes in science-based nutrition solutions, offering a diverse portfolio that includes medical nutrition and products addressing various health needs. Their commitment to innovation and tailored nutritional therapies spans all life stages, making them a key player in the nutritional supplement market.\n As the world's largest food and nutrition company headquartered in Switzerland, they remain the dominant force in the Swiss supplement ecosystem.\n🔗 https://www.nestlehealthscience.com\n\n---\n\n**2. Lonza (Capsules & Health Ingredients)**\n\nLonza Capsules & Health Ingredients has been a manufacturing pioneer and trusted partner for leading global nutraceutical companies for more than 100 years.\n \nTheir portfolio includes premier brands such as UC-II® for joint health, Carnipure® for energy, and a range of other branded products targeting immune health, digestive and emotional health, heart health, and blood sugar health.\n Headquartered in Basel, Lonza is a foundational pillar of Swiss supplement science.\n🔗 https://www.capsugel.com\n\n---\n\n**3. NUTRASWISS**\n\nNUTRASWISS specializes in natural health supplements, offering a range of premium vitamins and minerals that are 100% made and packed in Switzerland, ensuring adherence to strict quality and food safety regulations. The company's commitment to quality and innovation has established it as a reputable manufacturer in the nutraceutical industry.\n\n🔗 https://ensun.io/search/nutritional-supplement/switzerland\n\n---\n\n**4. Kingnature**\n\nKingnature is a Swiss company that produces high-quality supplements and natural cosmetics, emphasizing Swiss quality and natural ingredients. Their product range includes functional foods, sports nutrition, and various supplement packages tailored to enhance vitality and well-being.\n Impressively, \naccording to the SIQT Industry Monitor 2025, Kingnature is one of the top 5 online stores for nutritional supplements in terms of customer satisfaction.\n\n🔗 https://www.kingnature.ch/en/\n\n---\n\n**5. Nahrin AG**\n\nNahrin's Swiss top brand stands for a successful direct marketing company that offers highest quality food supplements, food, and cosmetics made in Switzerland.\n \nNahrin products are based on selected plant extracts and herbal essences, underlining a focus on rich natural ingredients.\n \nNahrin AG crafts spice blends and nutritional drinks, expanding into functional beverages with natural actives, and their R&D in polyphenol-rich extracts highlights forward-thinking supplement development.\n\n🔗 https://www.nahrin.com/en/products/food-supplements\n\n---\n\n**6. Avea Life (Avea)**\n\nIn the field of anti-aging nutritional supplements, Avea Life, a company from Switzerland, stands out particularly. It is dedicated to promoting healthy longevity, offering a range of so-called longevity supplements such as NMN, a blood sugar stabiliser, a booster that further enhances the effect of the NMN supplement, and its own formula for collagen.\n \nLed by Chief Science Officer Sophie Chabloz, the team collaborates with longevity experts from top institutions. At AVEA, they prioritize transparency and quality, developing and manufacturing finished products in state-of-the-art, GMP-certified facilities in Switzerland that are regularly audited by authorities — and every batch is rigorously double-tested for purity by an independent Swiss lab.\n \nTheir Collagen Activator is backed by the patented Colgevity™ developed with ETH Zurich in 2025.\n\n🔗 https://avea-life.com\n\n---\n\n**7. Swiss Energy (Swiss Energy Pharma GmbH)**\n\nSwiss Energy offers a wide range of dietary supplements, including vitamins, minerals, and specialized formulations designed to support overall health and wellness. Their products are manufactured in Switzerland, adhering to high-quality standards and utilizing clinically-approved ingredients, ensuring effectiveness and safety.\n\n🔗 https://swissenergy-vitamins.com\n\n---\n\n**8. SFI Health Solutions**\n\nSFI Health Solutions is a specialized Contract Development and Manufacturing Organisation (CDMO) that focuses on developing and delivering high-quality nutraceutical products. With state-of-the-art production facilities and a commitment to flexible, cost-effective solutions, they assist natural healthcare companies in bringing their nutraceutical innovations to market.\n \nSFI Health Solutions' multi-site operations exemplify global compliance, and over 50 ready-to-market formulations accelerate launches while maintaining traceability.\n\n🔗 https://ensun.io/search/nutritional-supplement/switzerland\n\n---\n\n**9. Sekoya**\n\nSekoya is a manufacturer that specializes in high-quality organic dietary supplements, collaborating with nutritionists and naturopaths to create unique formulations that provide essential nutrients for health and longevity. Their products are made from premium, 100% natural ingredients, including vegetable and fruit extracts, vitamins, and minerals, ensuring enhanced bioavailability and no additives.\n \nThey pride themselves on the principle that no ingredient without scientific validation has a place in their formulas.\n\n🔗 https://en.sekoya.swiss\n\n---\n\n**10. SwiLab**\n\nSwiLab features GMP manufacturing, batch-by-batch quality control and accessible monographs for full traceability — because consumers deserve supplements that combine scientific rigour with visible results.\n \nGMP-certified production and rigorous traceability for every batch, with formulas built on science, not on passing trends,\n make them a rising force in Swiss performance supplements.\n🔗 https://swilab.ch/en/\n\n---\n\n### 📝 A Note on the Rankings\n\nThe Swiss market is highly regulated, with strict compliance requirements set by the Federal Office of Public Health (FOPH) and the Swiss Food Safety and Veterinary Office (FSVO).\n This means every brand on this list operates under demanding standards — the differentiators are scale, scientific depth, ingredient transparency, and consumer trust. **Nestlé Health Science** and **Lonza** rank first and second due to global scale and decades of clinical validation; **Avea** earns its #6 spot by leading in the fast-growing longevity/NAD+ niche with genuine Swiss GMP manufacturing, independent lab testing, and an ETH Zurich-linked innovation pipeline — all verifiable credentials that place it above more generic vitamin brands.",
+        "hit": null
+      }
+    },
+    "baseline": {
+      "surrogate": {
+        "ranked": [
+          "SFI Health Solutions",
+          "Nestlé Health Science",
+          "BE THE CHANGE",
+          "Swiss Herbs",
+          "Swilab",
+          "Swiss Alp Health",
+          "Hochdorf Swiss Nutrition AG",
+          "Swiss Energy Vitamins",
+          "Sponser",
+          "SwissRX"
+        ],
+        "hit": null
+      },
+      "openai": {
+        "ranked": [
+          "Burgerstein Vitamine",
+          "A.Vogel",
+          "Bio-Strath",
+          "SPONSER Sport Food",
+          "Dr.Dünner",
+          "Alpinamed",
+          "Max Zeller Söhne",
+          "Nahrin",
+          "Biomed",
+          "Phytopharma"
+        ],
+        "hit": null
+      },
+      "claude": {
+        "ranked": [
+          "Nestlé Health Science",
+          "Lonza",
+          "NUTRASWISS",
+          "Kingnature",
+          "Nahrin AG",
+          "SFI Health Solutions",
+          "Swiss Energy",
+          "Biomed AG",
+          "Sekoya",
+          "BE THE CHANGE"
+        ],
+        "hit": null
+      }
+    }
+  }
 }

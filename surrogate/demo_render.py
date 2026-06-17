@@ -268,10 +268,16 @@ def domain_authority_html(openai_urls, claude_urls, *, top_n: int = 8,
         f"<svg viewBox='0 0 {width} {height}' class='dchart' "
         f"role='img' preserveAspectRatio='xMinYMin meet'>{''.join(bars)}</svg>"
     )
+    contributors = []
+    if openai_urls:
+        contributors.append("ChatGPT")
+    if claude_urls:
+        contributors.append("Claude")
+    who = " and ".join(contributors) if contributors else "the AI models"
     return (
         "<div class='chart'>"
         f"<div class='charthd'>Where AI looks when answering {_esc(category)}</div>"
-        "<div class='chartsub'>Domains ChatGPT and Claude actually cited to build "
+        f"<div class='chartsub'>Domains {who} cited to build "
         "their answers, ranked by frequency. These are the sources a brand needs "
         "to appear on to get recommended.</div>"
         f"{svg}</div>"
@@ -390,6 +396,50 @@ def brand_visibility_html(systems: dict, matches: dict, brand: str,
     )
 
 
+def counterfactual_html(record: dict) -> str:
+    """Before/after 'what if <brand> were listed on <anchor>' panel. Returns ''
+    when the run has no counterfactual block (it's an optional, GPU-produced
+    extra). Clearly labelled as a projection."""
+    cf = record.get("counterfactual")
+    if not cf:
+        return ""
+    brand = _esc(cf.get("brand", "the brand"))
+    anchor = _esc(cf.get("anchor", "a top source"))
+    base = cf.get("baseline", {})
+    sysd = cf.get("systems", {})
+    labels = {"openai": "ChatGPT", "claude": "Claude", "surrogate": "Our surrogate"}
+
+    def cell(ranked, hit, after):
+        if not hit:
+            return ("<span class='cf-no'>still absent</span>" if after
+                    else "<span class='cf-no'>absent</span>")
+        pos = next((i + 1 for i, x in enumerate(ranked or [])
+                    if str(x).lower() == str(hit).lower()), None)
+        where = f" (#{pos})" if pos else ""
+        mark = "&#10003; " if after else ""
+        cls = "cf-yes" if after else "cf-mid"
+        return f"<span class='{cls}'>{mark}appears{where}</span>"
+
+    rows = ["<tr><th>System</th><th>Before</th><th>After</th></tr>"]
+    for key in ("openai", "claude", "surrogate"):
+        b = base.get(key, {})
+        a = sysd.get(key, {})
+        rows.append(
+            f"<tr><td>{labels[key]}</td>"
+            f"<td>{cell(b.get('ranked'), b.get('hit'), False)}</td>"
+            f"<td>{cell(a.get('ranked'), a.get('hit'), True)}</td></tr>"
+        )
+    return (
+        "<div class='chart cf'>"
+        f"<div class='charthd'>What if {brand} were listed on {anchor}?</div>"
+        f"<div class='chartsub'>A projection. We re-asked each model assuming "
+        f"{brand} appears on {anchor}, grounded in {brand}'s real published data, "
+        f"and told it to include {brand} only if it genuinely ranks. "
+        f"Before vs after:</div>"
+        f"<table class='cftab'>{''.join(rows)}</table></div>"
+    )
+
+
 def graph_panels(record: dict) -> list[str]:
     """Registry: return the HTML for every graph applicable to this run, in
     display order. Always-on graphs render for any question; conditional ones
@@ -417,6 +467,13 @@ CHART_CSS = """
 .dchart .svglbl { fill:#444; font-size:13px; font-family:'Mulish',sans-serif; }
 .dchart .svglbl.you { fill:#B02A38; font-weight:700; }
 .dchart .svgval { fill:#176874; font-size:13px; font-weight:700; font-family:'Mulish',sans-serif; }
+.cftab { width:100%; border-collapse:collapse; margin-top:.3rem; }
+.cftab th { text-align:left; font-size:.8rem; text-transform:uppercase; letter-spacing:.04em;
+            color:#555; border-bottom:2px solid var(--teal); padding:.4rem .6rem; }
+.cftab td { padding:.45rem .6rem; border-bottom:1px solid var(--line); font-size:.92rem; }
+.cf-yes { color:#1B8090; font-weight:700; }
+.cf-mid { color:#176874; }
+.cf-no { color:#9a9a9a; }
 """
 
 

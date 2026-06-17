@@ -465,14 +465,16 @@ if page == "Ask":
             st.markdown("".join(card), unsafe_allow_html=True)
 
             # --- graph panels (brand visibility + domain authority …) ---------
-            from surrogate.demo_render import graph_panels, CHART_CSS
+            from surrogate.demo_render import (
+                graph_panels, counterfactual_html, CHART_CSS,
+            )
             _panels = graph_panels(rec)
-            if _panels:
-                st.markdown(
-                    f"<style>{CHART_CSS}</style>"
-                    f"<div class='charts-row'>{''.join(_panels)}</div>",
-                    unsafe_allow_html=True,
-                )
+            _cf = counterfactual_html(rec)
+            if _panels or _cf:
+                _row = (f"<div class='charts-row'>{''.join(_panels)}</div>"
+                        if _panels else "")
+                st.markdown(f"<style>{CHART_CSS}</style>{_row}{_cf}",
+                            unsafe_allow_html=True)
 
             # Surrogate trajectory is rendered lower (just before the full
             # answers) — it's dense, surrogate-specific detail. Captured here
@@ -528,7 +530,22 @@ if page == "Ask":
             with st.expander("Sources each model consulted"):
                 o_urls = sorted(set(sys_["openai"].get("urls") or []))
                 c_urls = sorted(set(sys_["claude"].get("urls") or []))
-                st.markdown(f"**ChatGPT cited {len(o_urls)} URL(s):**")
+                _osearch = 0
+                for tc in sys_["openai"].get("tool_calls") or []:
+                    a = tc.get("action") or {}
+                    _osearch += len(a.get("queries") or
+                                    ([a["query"]] if a.get("query") else []))
+                    if tc.get("kind") in ("tool_use", "web_search_call"):
+                        _osearch = max(_osearch, 1)
+                st.caption(
+                    "Claude's API exposes the pages its search returned; "
+                    "ChatGPT's only exposes URLs it explicitly cites, so its "
+                    "count can be 0 even when it searched."
+                )
+                o_hdr = (f"**ChatGPT ran {_osearch} web search(es) and cited "
+                         f"{len(o_urls)} URL(s):**" if _osearch
+                         else f"**ChatGPT cited {len(o_urls)} URL(s):**")
+                st.markdown(o_hdr)
                 for u in o_urls:
                     st.markdown(f"- {u}")
                 st.markdown(f"**Claude consulted {len(c_urls)} URL(s):**")

@@ -63,6 +63,9 @@ def claude_consulted_urls(resp: dict) -> list[str]:
 
 
 def openai_cited_urls(resp: dict) -> list[str]:
+    """URLs ChatGPT relied on. It exposes them two ways: as `url_citation`
+    annotation objects, OR (when we ask for 'source URL' in the answer) as
+    plain text in the answer body. We collect both, clean, and dedupe."""
     out: list[str] = []
     for blk in resp.get("blocks_raw") or []:
         if not isinstance(blk, dict) or blk.get("type") != "message":
@@ -72,10 +75,19 @@ def openai_cited_urls(resp: dict) -> list[str]:
                 continue
             for a in c.get("annotations") or []:
                 if isinstance(a, dict) and a.get("type") == "url_citation":
-                    u = a.get("url")
-                    if u:
-                        out.append(re.sub(r"[?&]utm_source=openai", "", u))
-    return out
+                    if a.get("url"):
+                        out.append(a["url"])
+    # plain-text URLs written into the answer body
+    out += _URL_RX.findall(resp.get("answer") or "")
+
+    seen, clean = set(), []
+    for u in out:
+        u = re.sub(r"[?&]utm_source=openai", "", u).rstrip(".,);]\"'")
+        k = u.rstrip("/").lower()
+        if u and k not in seen:
+            seen.add(k)
+            clean.append(u)
+    return clean
 
 
 def _domain_of(url: str) -> str:
@@ -476,6 +488,178 @@ def deep_suggestions(
         return out
     except Exception:
         return None
+
+
+# ---- counterfactual: pick a third-party platform anchor ---------------------
+# For the "what if <brand> were on the sources" demo we want to assume the
+# brand is listed on a PLATFORM the brand could realistically get onto (a
+# directory/review/ranking site), NOT a rival's own homepage. We classify a
+# cited domain as a competitor homepage if its name matches one of the brands
+# in any model's ranked list; everything else is treated as a platform.
+
+def _collapse(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(s).lower())
+
+
+# Domains we always treat as third-party platforms — fast pre-pass so common
+# ones never need the model call.
+_PLATFORM_ALLOWLIST = {
+    "consumerlab.com", "healthline.com", "fortune.com", "innerbody.com",
+    "consumerreports.org", "forbes.com", "health.com", "verywellhealth.com",
+    "wikipedia.org", "en.wikipedia.org", "statista.com", "zoominfo.com",
+    "rocketreach.co", "ensun.io", "swissmade.direct", "swissbiotech.org",
+    "pubmed.ncbi.nlm.nih.gov", "pmc.ncbi.nlm.nih.gov", "nsfsport.com",
+    "vitalabo.com", "tripadvisor.com", "amazon.com", "target.com",
+}
+
+_DOMAIN_CLASS_SYSTEM = """You label web domains by the role they play in a
+purchase-intent answer. For each domain return one type:
+- "brand_homepage": the official site of a single product/company (often one
+  that's being recommended). Also give its brand name.
+- "directory": lists many companies/products (aggregators, company databases).
+- "review": editorial / ranking / "best of" / review publications.
+- "research": scientific, medical, clinical, or standards/certification bodies.
+- "retail": shops selling many different brands.
+- "other": anything else.
+Return ONLY compact JSON: {"<domain>": {"type": "...", "brand": "<name or null>"}}."""
+
+
+def _heuristic_brand_homes(domains: list[str], brands: list[str]) -> set[str]:
+    """Fallback string heuristic when the model call is unavailable."""
+    keys = []
+    for it in brands:
+        k = _collapse(it)
+        for gen in ("swiss", "health", "nutrition", "supplements",
+                    "vitamins", "solutions", "ag", "the", "life"):
+            k = k.replace(gen, "")
+        if len(k) >= 4:
+            keys.append(k)
+    return {d for d in domains if any(k in _collapse(d) for k in keys)}
+
+
+def classify_cited_domains(record: dict) -> dict:
+    """Label every cited domain by role. Allowlist pre-pass + one Haiku call
+    for the rest; falls back to the string heuristic if the call fails.
+    Returns {domain: {"type": str, "brand": str|None}}."""
+    from collections import Counter
+    import os
+
+    # cache on the record so we classify once per run (Haiku is non-deterministic
+    # and several features reuse this), and it persists into the fixture.
+    if isinstance(record.get("_domain_class"), dict):
+        return record["_domain_class"]
+
+    sysd = record.get("systems", {})
+    urls = ((sysd.get("openai", {}).get("urls") or [])
+            + (sysd.get("claude", {}).get("urls") or []))
+    domains = list({d for d in (_domain_of(u) for u in urls) if d})
+    if not domains:
+        return {}
+    brands = [it for s in sysd.values() for it in (s.get("ranked") or [])]
+
+    out: dict = {}
+    todo = []
+    for d in domains:
+        if d in _PLATFORM_ALLOWLIST:
+            out[d] = {"type": "directory", "brand": None}
+        else:
+            todo.append(d)
+
+    if todo:
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(max_retries=3)
+            model = os.environ.get("JUDGE_CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+            user = json.dumps({"domains": todo, "recommended_brands": brands},
+                              ensure_ascii=False)
+            resp = client.messages.create(
+                model=model, max_tokens=2000,
+                system=_DOMAIN_CLASS_SYSTEM,
+                messages=[{"role": "user", "content": user}],
+            )
+            text = "".join(b.text for b in resp.content
+                           if getattr(b, "type", None) == "text")
+            m = re.search(r"\{.*\}", text, re.S)
+            data = json.loads(m.group(0)) if m else {}
+            for d in todo:
+                e = data.get(d) or {}
+                out[d] = {"type": e.get("type", "other"),
+                          "brand": e.get("brand")}
+        except Exception:
+            # fallback: string heuristic decides brand_homepage vs other
+            homes = _heuristic_brand_homes(todo, brands)
+            for d in todo:
+                out[d] = {"type": "brand_homepage" if d in homes else "other",
+                          "brand": None}
+    if isinstance(record, dict):
+        record["_domain_class"] = out
+    return out
+
+
+def pick_platform_anchor(record: dict) -> tuple[str, list[str]]:
+    """Return (top_platform_domain, all_platform_domains): the run's most-cited
+    domains that are NOT a recommended brand's own homepage, ranked by citation
+    frequency. Uses the LLM domain classifier (with heuristic fallback)."""
+    from collections import Counter
+    sysd = record.get("systems", {})
+    urls = ((sysd.get("openai", {}).get("urls") or [])
+            + (sysd.get("claude", {}).get("urls") or []))
+    counts: Counter = Counter()
+    for u in urls:
+        d = _domain_of(u)
+        if d:
+            counts[d] += 1
+    if not counts:
+        return "", []
+
+    cls = classify_cited_domains(record)
+    platforms = [(d, n) for d, n in counts.most_common()
+                 if (cls.get(d, {}).get("type") or "other") != "brand_homepage"]
+    if not platforms:
+        return "", []
+    return platforms[0][0], [d for d, _ in platforms]
+
+
+def _counterfactual_suffix(brand: str, blurb: str, anchor: str) -> str:
+    return (
+        f"\n\nAdditional context for this query: assume {brand} now appears among "
+        f"the web sources for this question — it is listed on {anchor}, a "
+        f"third-party directory/review platform for this category. {brand} is a "
+        f"real, verified brand: {blurb} Re-answer the question on the merits, "
+        f"ranking the genuinely best options. Include {brand} only if, given this "
+        f"information, it genuinely belongs among them."
+    )
+
+
+def counterfactual_run(question: str, brand: str, blurb: str, anchor: str,
+                       *, k: int = 10, mode: str = "structured") -> dict:
+    """Re-ask the question of all three models under the assumption that `brand`
+    is now discoverable (listed on `anchor`), grounded with real `blurb` data
+    and neutral framing. Returns picks + whether the brand now appears, per
+    model. This is a PROJECTION ('what if'), not a current-state measurement."""
+    aug = question + _counterfactual_suffix(brand, blurb, anchor)
+
+    sur = loop_run(aug, tools=default_tools())
+    sur_ranked = extract_pick_topN(sur.final_answer or "", k=k)["ranked"]
+    oai = ask_openai(aug, mode=mode)
+    oai_ranked = extract_pick_topN(oai["answer"], k=k)["ranked"]
+    cla = ask_claude(aug, mode=mode)
+    cla_ranked = extract_pick_topN(cla["answer"], k=k)["ranked"]
+
+    def block(model, ranked, answer):
+        return {"model": model, "ranked": ranked,
+                "answer": answer, "hit": brand_hit(ranked, brand)}
+
+    return {
+        "brand": brand,
+        "anchor": anchor,
+        "blurb": blurb,
+        "systems": {
+            "surrogate": block("qwen3-32b (surrogate)", sur_ranked, sur.final_answer or ""),
+            "openai": block(oai["model"], oai_ranked, oai["answer"]),
+            "claude": block(cla["model"], cla_ranked, cla["answer"]),
+        },
+    }
 
 
 # ---- the 3-way run ----------------------------------------------------------

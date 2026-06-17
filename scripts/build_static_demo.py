@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from surrogate.demo_render import (  # noqa: E402
     trajectory_inner_html, TRAJECTORY_CSS, TRAJECTORY_JS, OVERLAY_HTML,
-    graph_panels, CHART_CSS,
+    graph_panels, counterfactual_html, CHART_CSS,
 )
 FIXTURE = ROOT / "data/demo_fixture.json"
 LOGO = ROOT / "static/avea_logo.png"
@@ -145,9 +145,28 @@ def build() -> str:
     # sources consulted
     o_urls = sorted(set(sysd["openai"].get("urls") or []))
     c_urls = sorted(set(sysd["claude"].get("urls") or []))
+
+    def _n_searches(sysrec):
+        n = 0
+        for tc in sysrec.get("tool_calls") or []:
+            a = tc.get("action") or {}
+            n += len(a.get("queries") or ([a["query"]] if a.get("query") else []))
+            if tc.get("kind") in ("tool_use", "web_search_call"):
+                n = max(n, 1)
+        return n
+
+    o_searches = _n_searches(sysd["openai"])
+    # ChatGPT only exposes URLs it explicitly cites; note searches so "0 cited"
+    # doesn't read as "didn't search".
+    o_hdr = (f"ChatGPT ran {o_searches} web search(es) and cited "
+             f"{len(o_urls)} URL(s)" if o_searches
+             else f"ChatGPT cited {len(o_urls)} URL(s)")
     src = (
         "<details class='block'><summary>Sources each model consulted</summary>"
-        f"<p><strong>ChatGPT cited {len(o_urls)} URL(s):</strong></p><ul>"
+        f"<p class='cap'>Note: Claude's API exposes the pages its search returned; "
+        f"ChatGPT's only exposes URLs it explicitly cites in its answer, so its "
+        f"count can be 0 even when it searched.</p>"
+        f"<p><strong>{o_hdr}:</strong></p><ul>"
         + "".join(f"<li><a href='{esc(u)}' target='_blank'>{esc(u)}</a></li>" for u in o_urls)
         + f"</ul><p><strong>Claude consulted {len(c_urls)} URL(s):</strong></p><ul>"
         + "".join(f"<li><a href='{esc(u)}' target='_blank'>{esc(u)}</a></li>" for u in c_urls)
@@ -197,6 +216,8 @@ def build() -> str:
     # ones) sit right after the suggestions card, side by side, as evidence.
     _panels = graph_panels(rec)
     charts = f"<div class='charts-row'>{''.join(_panels)}</div>" if _panels else ""
+    # before/after counterfactual panel (empty until a GPU run produces it)
+    charts += counterfactual_html(rec)
 
     # The surrogate trajectory now lives inside the Full answers section (as the
     # surrogate's reasoning), so it's not a standalone block here.
