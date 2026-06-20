@@ -96,6 +96,13 @@ span[translate="no"] {
     padding-left: 2rem;
     padding-right: 2rem;
 }
+/* When the sidebar is collapsed, make the main area reclaim the full width so
+   the centered block sits in the true viewport center. Without this Streamlit
+   1.57 can leave residual left space, making the content look shifted right. */
+section[data-testid="stMain"] {
+    width: 100% !important;
+    margin-left: 0 !important;
+}
 
 /* widget labels ("Your question", "Mode", "Brand to track", …) */
 [data-testid="stWidgetLabel"] p,
@@ -288,17 +295,47 @@ if page == "Documents":
 
 # ----- ASK --------------------------------------------------------------------
 
+def _test_fixtures():
+    """Available canned fixtures for Test mode: [(question, path), …], the main
+    Swiss demo first, then anything under data/fixtures/. Used to offer a
+    question selector that mirrors the static demo."""
+    from pathlib import Path
+    import json as _json
+    paths = []
+    main = Path("data/demo_fixture.json")
+    if main.exists():
+        paths.append(main)
+    fx = Path("data/fixtures")
+    if fx.exists():
+        paths += sorted(p for p in fx.glob("*.json"))
+    out = []
+    for p in paths:
+        try:
+            q = _json.loads(p.read_text()).get("question", p.stem)
+        except Exception:
+            continue
+        out.append((q, str(p)))
+    return out
+
+
 if page == "Ask":
     # `mode` comes from the sidebar dropdown. The form makes Enter in any
     # text field submit the run; mode-specific controls swap live because
     # the selectbox lives outside the form.
     brand, k, compare_glm = "Avea", 5, False
     with st.form("ask_form", border=False):
-        q = st.text_input(
-            "Your question",
-            value="What are the top 10 Swiss supplement brands?" if test_mode else "",
-            placeholder="e.g. which restaurant is the best for italian food in Tashkent",
-        )
+        if test_mode and mode.startswith("Compare"):
+            # Test mode renders canned fixtures; offer the available examples as
+            # a selector that mirrors the static demo's question dropdown.
+            _fx_opts = [q for q, _ in _test_fixtures()] or [
+                "What are the top 10 Swiss supplement brands?"]
+            q = st.selectbox("Your question", options=_fx_opts)
+        else:
+            q = st.text_input(
+                "Your question",
+                value="What are the top 10 Swiss supplement brands?" if test_mode else "",
+                placeholder="e.g. which restaurant is the best for italian food in Tashkent",
+            )
         if mode.startswith("Compare"):
             brand = st.text_input(
                 "Brand to track",
@@ -392,8 +429,10 @@ if page == "Ask":
 
             if test_mode:
                 import json as _json
+                _fx_map = {q2: p for q2, p in _test_fixtures()}
+                _path = _fx_map.get(q, "data/demo_fixture.json")
                 try:
-                    with open("data/demo_fixture.json") as f:
+                    with open(_path) as f:
                         rec = _json.load(f)
                 except FileNotFoundError:
                     st.error("data/demo_fixture.json missing. Run "
@@ -562,7 +601,12 @@ if page == "Ask":
                     if s.get("error"):
                         st.error(s["error"])
                         continue
-                    st.write(s.get("answer") or "(empty)")
+                    # Verbatim but with clickable links: linkify_verbatim
+                    # HTML-escapes everything (so '**', '_Source:_', '$20–$50'
+                    # show as-is — no Markdown/LaTeX) and turns bare URLs into
+                    # links. st.html renders HTML without running Markdown.
+                    from surrogate.demo_render import linkify_verbatim as _lv
+                    st.html(_lv(s.get("answer") or "(empty)"))
                     # Surrogate's "reasoning" is the interactive step-by-step
                     # trajectory (click a phrase → sources). Rendered as an
                     # isolated HTML component so the click JS works. Frontiers

@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from surrogate.demo_render import (  # noqa: E402
     trajectory_inner_html, TRAJECTORY_CSS, TRAJECTORY_JS, OVERLAY_HTML,
-    graph_panels, counterfactual_html, CHART_CSS,
+    graph_panels, counterfactual_html, CHART_CSS, linkify_verbatim,
 )
 FIXTURE = ROOT / "data/demo_fixture.json"
 LOGO = ROOT / "static/avea_logo.png"
@@ -48,16 +48,19 @@ def render_trajectory(traj) -> str:
     )
 
 
-def build() -> str:
-    rec = json.loads(FIXTURE.read_text())
+def _slug(s: str) -> str:
+    out = "".join(c if c.isalnum() else "-" for c in str(s).lower())
+    return "-".join(p for p in out.split("-") if p)[:40] or "ex"
+
+
+def render_results(rec: dict, id_prefix: str = "") -> str:
+    """Render one fixture's full results block (pills → answers). `id_prefix`
+    namespaces the trajectory element IDs so multiple examples can coexist."""
     sysd = rec["systems"]
     m = rec["matches"]
     sug = rec["suggestions"]
     deep = rec.get("deep") or {}
     brand = rec["brand"]
-    question = rec["question"]
-
-    logo_b64 = base64.b64encode(LOGO.read_bytes()).decode() if LOGO.exists() else ""
 
     sur = sysd["surrogate"]["ranked"]
     oai = sysd["openai"]["ranked"]
@@ -178,7 +181,7 @@ def build() -> str:
     # verbatim thinking since we can't bind theirs to sources.
     def ans_block(key, label):
         s = sysd[key]
-        body = esc(s.get("answer") or "(empty)").replace("\n", "<br>")
+        body = linkify_verbatim(s.get("answer") or "(empty)")
         think = ""
         if key == "surrogate":
             traj = s.get("trajectory") or []
@@ -187,7 +190,7 @@ def build() -> str:
                     "<p><strong>Reasoning, step by step, with sources.</strong> "
                     "<span class='cap'>Click any highlighted phrase to see the "
                     "exact sources that step pulled.</span></p>"
-                    f"<div class='traj'>{trajectory_inner_html(traj)}</div>"
+                    f"<div class='traj'>{trajectory_inner_html(traj, id_prefix)}</div>"
                 )
             elif s.get("thinking"):
                 think = ("<p><strong>Reasoning (verbatim):</strong></p>"
@@ -209,9 +212,6 @@ def build() -> str:
         for lbl in ["Surrogate", "ChatGPT", "Claude", "Match scoring", "Deep analysis"]
     )
 
-    logo_tag = (f"<img src='data:image/png;base64,{logo_b64}' alt='AVEA'/>"
-                if logo_b64 else "AVEA")
-
     # Graph panels (brand visibility + domain authority, plus any conditional
     # ones) sit right after the suggestions card, side by side, as evidence.
     _panels = graph_panels(rec)
@@ -221,15 +221,58 @@ def build() -> str:
 
     # The surrogate trajectory now lives inside the Full answers section (as the
     # surrogate's reasoning), so it's not a standalone block here.
-    results = (
+    return (
         f"<div class='pills'>{pills}</div>"
         f"{picks_table}<p class='cap'>{caption}</p>"
         f"{card}{charts}{deep_html}{src}{answers}"
     )
 
+
+def build(fixtures: list[Path] | Path = FIXTURE) -> str:
+    """Build the static demo. Accepts one fixture or several; with several, a
+    question selector dropdown swaps between the embedded examples client-side
+    (each example's trajectory IDs are namespaced so they don't collide)."""
+    if isinstance(fixtures, (str, Path)):
+        fixtures = [fixtures]
+    recs = [json.loads(Path(f).read_text()) for f in fixtures]
+
+    logo_b64 = base64.b64encode(LOGO.read_bytes()).decode() if LOGO.exists() else ""
+    logo_tag = (f"<img src='data:image/png;base64,{logo_b64}' alt='AVEA'/>"
+                if logo_b64 else "AVEA")
+
+    # unique key per example (from its question)
+    keys, seen = [], {}
+    for rec in recs:
+        k = _slug(rec.get("question", "ex"))
+        if k in seen:
+            seen[k] += 1
+            k = f"{k}-{seen[k]}"
+        else:
+            seen[k] = 0
+        keys.append(k)
+
+    options = "".join(
+        f"<option value='{esc(k)}'>{esc(rec.get('question',''))}</option>"
+        for k, rec in zip(keys, recs)
+    )
+    selector = (
+        "<label class='q' for='qsel'>Your question</label>"
+        f"<select id='qsel' class='qsel'>{options}</select>"
+    ) if len(recs) > 1 else (
+        "<label class='q' for='qsel'>Your question</label>"
+        f"<input type='text' id='qsel' value=\"{esc(recs[0].get('question',''))}\" readonly />"
+    )
+
+    examples = "".join(
+        f"<div class='example' data-key='{esc(k)}'"
+        f"{'' if i == 0 else ' style=\"display:none\"'}>"
+        f"{render_results(rec, id_prefix=k + '-')}</div>"
+        for i, (k, rec) in enumerate(zip(keys, recs))
+    )
+
     return _TEMPLATE.format(
-        question=esc(question),
-        results=results,
+        selector=selector,
+        examples=examples,
         logo=logo_tag,
         traj_css=TRAJECTORY_CSS + CHART_CSS,
         traj_js=TRAJECTORY_JS,
@@ -255,8 +298,10 @@ _TEMPLATE = """<!DOCTYPE html>
   .header img {{ height:2.4rem; }}
   .header .accent {{ color:var(--teal); }}
   label.q {{ font-size:1.12rem; font-weight:600; display:block; margin-bottom:.4rem; }}
-  input[type=text] {{ width:100%; padding:.6rem .8rem; font-size:1rem; font-family:'Mulish',sans-serif;
-                      border:1px solid #ccc; border-radius:8px; }}
+  input[type=text], select.qsel {{ width:100%; padding:.6rem .8rem; font-size:1rem;
+                      font-family:'Mulish',sans-serif; border:1px solid #ccc;
+                      border-radius:8px; background:#fff; color:var(--ink); }}
+  select.qsel {{ cursor:pointer; }}
   .btn {{ background:var(--teal); color:#fff; border:none; border-radius:999px;
           padding:.55rem 2rem; font-weight:700; font-size:1rem; cursor:pointer; margin-top:1rem; }}
   .btn:hover {{ background:var(--teal-d); }}
@@ -290,26 +335,38 @@ _TEMPLATE = """<!DOCTYPE html>
 <body><div class="wrap">
   <div class="header">{logo}<span class="accent">AI Visibility Analyzer</span></div>
 
-  <label class="q" for="q">Your question</label>
-  <input type="text" id="q" value="{question}" />
+  {selector}
   <label class="q" for="b" style="margin-top:1rem;">Brand to track</label>
   <input type="text" id="b" value="Avea" />
   <button class="btn" type="button" id="runbtn">Run</button>
 
-  <div id="results">{results}</div>
+  <div id="results">{examples}</div>
 </div>
 <script>
-/* Run button: bound here in its own script so a later error can't disable it,
-   and with a guarded plain scroll (iOS WebKit can throw on the options form). */
+/* Question selector + Run button. Bound in its own script so a later error
+   can't disable it; scroll is guarded (iOS WebKit can throw on the options
+   form). Only the selected example is shown; switching swaps it in place. */
 (function(){{
+  var sel=document.getElementById('qsel');
+  var results=document.getElementById('results');
+  function show(key){{
+    var ex=results.querySelectorAll('.example');
+    for(var i=0;i<ex.length;i++){{
+      ex[i].style.display = (ex[i].getAttribute('data-key')===key)?'block':'none';
+    }}
+  }}
+  if(sel && sel.tagName==='SELECT'){{
+    sel.addEventListener('change', function(){{ show(this.value); }});
+  }}
   var b=document.getElementById('runbtn');
-  if(!b) return;
-  b.addEventListener('click', function(){{
-    var r=document.getElementById('results');
-    if(r) r.style.display='block';
-    try{{ b.scrollIntoView({{behavior:'smooth'}}); }}
-    catch(e){{ try{{ b.scrollIntoView(); }}catch(_){{}} }}
-  }});
+  if(b){{
+    b.addEventListener('click', function(){{
+      if(sel && sel.value){{ show(sel.value); }}
+      if(results) results.style.display='block';
+      try{{ b.scrollIntoView({{behavior:'smooth'}}); }}
+      catch(e){{ try{{ b.scrollIntoView(); }}catch(_){{}} }}
+    }});
+  }}
 }})();
 </script>
 {overlay}
@@ -319,10 +376,32 @@ _TEMPLATE = """<!DOCTYPE html>
 
 
 def main() -> int:
-    OUT_DIR.mkdir(exist_ok=True)
-    out = OUT_DIR / "index.html"
-    out.write_text(build())
-    print(f"Wrote {out} ({out.stat().st_size:,} bytes)")
+    import argparse
+    ap = argparse.ArgumentParser(description="Build the static HTML demo.")
+    ap.add_argument("--fixture", action="append", default=None,
+                    help="fixture JSON to render; repeatable for a multi-example "
+                         "selector. Default: Swiss + German fixtures if present.")
+    ap.add_argument("--out", default=str(OUT_DIR / "index.html"),
+                    help="output HTML path (default: static_demo/index.html)")
+    args = ap.parse_args()
+
+    if args.fixture:
+        fixtures = [Path(f) for f in args.fixture]
+    else:
+        # default: the main Swiss demo first, then every fixture under
+        # data/fixtures/ (alphabetical). Pass --fixture repeatedly to control
+        # the dropdown order.
+        fixtures = [FIXTURE] if FIXTURE.exists() else []
+        fxdir = ROOT / "data/fixtures"
+        if fxdir.exists():
+            fixtures += sorted(fxdir.glob("*.json"))
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(build(fixtures))
+    print(f"Wrote {out} ({out.stat().st_size:,} bytes) from {len(fixtures)} example(s):")
+    for f in fixtures:
+        print(f"  - {f}")
     print(f"Zip it:  zip -r demo.zip static_demo")
     return 0
 

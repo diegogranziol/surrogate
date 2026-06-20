@@ -620,46 +620,123 @@ def pick_platform_anchor(record: dict) -> tuple[str, list[str]]:
     return platforms[0][0], [d for d, _ in platforms]
 
 
-def _counterfactual_suffix(brand: str, blurb: str, anchor: str) -> str:
+# Counterfactual scenarios: each is a distinct "what if <brand> became more
+# discoverable" premise. They are PROJECTIONS appended to the question prompt —
+# we do NOT inject data into any tool's results (frontier search is opaque), we
+# just ask the model to reason as if the premise held, grounded in the brand's
+# real blurb, and to include the brand only if it then genuinely belongs.
+_CF_SCENARIOS: tuple[str, ...] = ("listing", "ownsite", "wikipedia")
+
+_CF_LABELS: dict[str, str] = {
+    "listing": "Listed on a top source",
+    "ownsite": "Own site ranks in search",
+    "wikipedia": "Has a Wikipedia page",
+}
+
+
+def _cf_premise(brand: str, scenario: str, anchor: str = "") -> str:
+    if scenario == "listing":
+        return (f"assume {brand} now appears among the web sources for this "
+                f"question — it is listed on {anchor}, a third-party "
+                f"directory/review platform for this category.")
+    if scenario == "ownsite":
+        return (f"assume {brand}'s official website now ranks on the first page "
+                f"of search results for this question, so the brand is directly "
+                f"discoverable through ordinary web search.")
+    if scenario == "wikipedia":
+        return (f"assume {brand} now has its own dedicated Wikipedia article, so "
+                f"independent encyclopedic background about the brand (its "
+                f"history, products, and notability) is available among the web "
+                f"sources.")
+    return f"assume {brand} now appears among the web sources for this question."
+
+
+def _counterfactual_suffix(brand: str, blurb: str, scenario: str,
+                           anchor: str = "") -> str:
     return (
-        f"\n\nAdditional context for this query: assume {brand} now appears among "
-        f"the web sources for this question — it is listed on {anchor}, a "
-        f"third-party directory/review platform for this category. {brand} is a "
-        f"real, verified brand: {blurb} Re-answer the question on the merits, "
-        f"ranking the genuinely best options. Include {brand} only if, given this "
-        f"information, it genuinely belongs among them."
+        f"\n\nAdditional context for this query: {_cf_premise(brand, scenario, anchor)} "
+        f"{brand} is a real, verified brand: {blurb} Re-answer the question on the "
+        f"merits, ranking the genuinely best options. Include {brand} only if, "
+        f"given this information, it genuinely belongs among them."
     )
 
 
+def _cf_run_models(aug: str, brand: str, k: int, mode: str) -> dict:
+    """Run one augmented question across all three models in parallel; return
+    {system: {model, ranked, answer, hit}}."""
+    def _sur():
+        sur = loop_run(aug, tools=default_tools())
+        ans = sur.final_answer or ""
+        return ("qwen3-32b (surrogate)", extract_pick_topN(ans, k=k)["ranked"], ans)
+
+    def _oai():
+        r = ask_openai(aug, mode=mode)
+        return (r["model"], extract_pick_topN(r["answer"], k=k)["ranked"], r["answer"])
+
+    def _cla():
+        r = ask_claude(aug, mode=mode)
+        return (r["model"], extract_pick_topN(r["answer"], k=k)["ranked"], r["answer"])
+
+    out: dict = {}
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        futs = {"surrogate": ex.submit(_sur),
+                "openai": ex.submit(_oai),
+                "claude": ex.submit(_cla)}
+        for name, fut in futs.items():
+            model, ranked, answer = fut.result()
+            out[name] = {"model": model, "ranked": ranked, "answer": answer,
+                         "hit": brand_hit(ranked, brand)}
+    return out
+
+
 def counterfactual_run(question: str, brand: str, blurb: str, anchor: str,
-                       *, k: int = 10, mode: str = "structured") -> dict:
-    """Re-ask the question of all three models under the assumption that `brand`
-    is now discoverable (listed on `anchor`), grounded with real `blurb` data
-    and neutral framing. Returns picks + whether the brand now appears, per
-    model. This is a PROJECTION ('what if'), not a current-state measurement."""
-    aug = question + _counterfactual_suffix(brand, blurb, anchor)
-
-    sur = loop_run(aug, tools=default_tools())
-    sur_ranked = extract_pick_topN(sur.final_answer or "", k=k)["ranked"]
-    oai = ask_openai(aug, mode=mode)
-    oai_ranked = extract_pick_topN(oai["answer"], k=k)["ranked"]
-    cla = ask_claude(aug, mode=mode)
-    cla_ranked = extract_pick_topN(cla["answer"], k=k)["ranked"]
-
-    def block(model, ranked, answer):
-        return {"model": model, "ranked": ranked,
-                "answer": answer, "hit": brand_hit(ranked, brand)}
-
+                       *, k: int = 10, mode: str = "structured",
+                       scenario: str = "listing") -> dict:
+    """Re-ask the question of all three models under ONE counterfactual scenario.
+    A PROJECTION ('what if'), not a current-state measurement. Kept for callers
+    that want a single scenario; counterfactual_scenarios() runs the full set."""
+    aug = question + _counterfactual_suffix(brand, blurb, scenario, anchor=anchor)
     return {
         "brand": brand,
         "anchor": anchor,
         "blurb": blurb,
-        "systems": {
-            "surrogate": block("qwen3-32b (surrogate)", sur_ranked, sur.final_answer or ""),
-            "openai": block(oai["model"], oai_ranked, oai["answer"]),
-            "claude": block(cla["model"], cla_ranked, cla["answer"]),
-        },
+        "scenario": scenario,
+        "systems": _cf_run_models(aug, brand, k, mode),
     }
+
+
+def counterfactual_scenarios(question: str, brand: str, blurb: str, anchor: str,
+                             *, k: int = 10, mode: str = "structured",
+                             scenarios: tuple[str, ...] = _CF_SCENARIOS,
+                             status_cb=None) -> dict:
+    """Run several counterfactual scenarios (listed-on-source / own-site-in-search
+    / has-Wikipedia-page) across all three models. Returns:
+
+        {brand, blurb, anchor, scenarios: [{id, label, anchor, systems{...}}, …]}
+
+    Each scenario is an independent projection; the baseline is the brand's
+    current picks (added by the caller for the before/after panel)."""
+    runs = []
+    for sc in scenarios:
+        if status_cb:
+            try:
+                status_cb(sc, "running")
+            except Exception:
+                pass
+        aug = question + _counterfactual_suffix(brand, blurb, sc, anchor=anchor)
+        systems = _cf_run_models(aug, brand, k, mode)
+        runs.append({
+            "id": sc,
+            "label": _CF_LABELS.get(sc, sc),
+            "anchor": anchor if sc == "listing" else None,
+            "systems": systems,
+        })
+        if status_cb:
+            try:
+                status_cb(sc, "done")
+            except Exception:
+                pass
+    return {"brand": brand, "blurb": blurb, "anchor": anchor, "scenarios": runs}
 
 
 # ---- classic Google rank (#6) ----------------------------------------------

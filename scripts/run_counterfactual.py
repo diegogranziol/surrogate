@@ -14,7 +14,9 @@ sys.path.insert(0, str(ROOT))
 from dotenv import load_dotenv
 load_dotenv()
 
-from surrogate.compare import pick_platform_anchor, counterfactual_run, brand_hit
+from surrogate.compare import (
+    pick_platform_anchor, counterfactual_scenarios, brand_hit,
+)
 
 # Grounded factual blurb, taken from avea-life.com (not invented).
 AVEA_BLURB = (
@@ -41,8 +43,13 @@ def main() -> int:
         print("no platform anchor found; aborting")
         return 1
 
-    print("Running counterfactual across all three models…", flush=True)
-    cf = counterfactual_run(question, brand, AVEA_BLURB, anchor, k=k, mode=mode)
+    print("Running counterfactual scenarios across all three models…", flush=True)
+
+    def cb(sc, state):
+        print(f"  [{sc}] {state}", flush=True)
+
+    cf = counterfactual_scenarios(question, brand, AVEA_BLURB, anchor,
+                                  k=k, mode=mode, status_cb=cb)
 
     # baseline hits (from the current fixture picks) for the before/after panel
     cf["baseline"] = {
@@ -63,9 +70,11 @@ def main() -> int:
     print("\n--- before / after (brand appears?) ---")
     for name in ("surrogate", "openai", "claude"):
         b = bool(cf["baseline"][name]["hit"])
-        a = bool(cf["systems"][name]["hit"])
-        hitname = cf["systems"][name]["hit"] or ""
-        print(f"  {name:9s}: baseline={b}  ->  counterfactual={a}  {hitname}")
+        cells = []
+        for sc in cf["scenarios"]:
+            hit = sc["systems"][name]["hit"]
+            cells.append(f"{sc['id']}={'Y' if hit else 'n'}")
+        print(f"  {name:9s}: baseline={'Y' if b else 'n'}  ->  " + "  ".join(cells))
     print("\nWrote data/demo_fixture.json")
     return 0
 

@@ -57,6 +57,44 @@ def _esc(s) -> str:
     return html.escape(str(s if s is not None else ""))
 
 
+_VERBATIM_URL_RE = re.compile(r"https?://[^\s<>]+")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_ITALIC_RE = re.compile(r"(?<!\w)_(.+?)_(?!\w)")
+
+
+def linkify_verbatim(text: str) -> str:
+    """Render a model's answer for display: keep its content faithful but show
+    the light Markdown it actually uses (**bold**, _italic_) as formatting, turn
+    bare URLs into clickable links, and keep '$20–$50' literal (NO LaTeX). Use
+    with st.html() / raw HTML — NOT st.markdown (which would eat '$…$' as math).
+
+    Deliberately handles only **bold** and _italic_ (what these answers use) so
+    stray '*' / '_' elsewhere can't garble the text."""
+    s = _esc(text or "")
+
+    # stash URLs first so the emphasis passes can't touch their punctuation
+    urls: list[str] = []
+
+    def _stash(m):
+        urls.append(m.group(0))
+        return f"\x00U{len(urls) - 1}\x00"
+
+    s = _VERBATIM_URL_RE.sub(_stash, s)
+    s = _BOLD_RE.sub(r"<strong>\1</strong>", s)
+    s = _ITALIC_RE.sub(r"<em>\1</em>", s)
+
+    def _restore(m):
+        url = urls[int(m.group(1))]
+        trail = ""
+        while url and url[-1] in ".,)]}":   # don't swallow trailing punctuation
+            trail = url[-1] + trail
+            url = url[:-1]
+        return f"<a href='{url}' target='_blank' rel='noopener'>{url}</a>{trail}"
+
+    s = re.sub(r"\x00U(\d+)\x00", _restore, s)
+    return s.replace("\n", "<br>")
+
+
 def _fact_chip(f: dict) -> str:
     """One extracted entity -> a compact 'Type: name · ★rating (n) · price' chip."""
     bits = []
@@ -100,15 +138,19 @@ def _evidence_html(step: dict) -> str:
     return ""
 
 
-def trajectory_inner_html(traj: list[dict]) -> str:
+def trajectory_inner_html(traj: list[dict], id_prefix: str = "") -> str:
     """Timeline items (no wrapper, no <style>/<script>). Each step that pulled
-    sources holds a hidden `.srcdata` div the modal reads on click."""
+    sources holds a hidden `.srcdata` div the modal reads on click.
+
+    `id_prefix` namespaces the per-step element IDs (e.g. 'swiss-src0') so
+    several trajectories can coexist in one document — needed when the static
+    demo embeds multiple examples behind a selector."""
     if not traj:
         return ""
     items = []
     for s in traj:
         step = s.get("step", 0)
-        pid = f"src{step}"
+        pid = f"{id_prefix}src{step}"
         urls = s.get("urls") or []
         icon = _TOOL_ICON.get(s.get("tool"), "&#8226;")
         action = _esc(s.get("action") or "")
@@ -410,38 +452,75 @@ def brand_visibility_html(systems: dict, matches: dict, brand: str,
     )
 
 
+_CF_SYS_LABELS = {"openai": "ChatGPT", "claude": "Claude",
+                  "surrogate": "Our surrogate"}
+
+
+def _cf_cell(ranked, hit, after):
+    """One before/after status cell for the counterfactual table."""
+    if not hit:
+        return ("<span class='cf-no'>still absent</span>" if after
+                else "<span class='cf-no'>absent</span>")
+    pos = next((i + 1 for i, x in enumerate(ranked or [])
+                if str(x).lower() == str(hit).lower()), None)
+    where = f" (#{pos})" if pos else ""
+    mark = "&#10003; " if after else ""
+    cls = "cf-yes" if after else "cf-mid"
+    return f"<span class='{cls}'>{mark}appears{where}</span>"
+
+
 def counterfactual_html(record: dict) -> str:
-    """Before/after 'what if <brand> were listed on <anchor>' panel. Returns ''
+    """Counterfactual 'what if <brand> were more discoverable' panel. Returns ''
     when the run has no counterfactual block (it's an optional, GPU-produced
-    extra). Clearly labelled as a projection."""
+    extra). Always clearly labelled as a projection. Handles two shapes:
+      - multi-scenario: cf['scenarios'] = [{id,label,systems}, …] → one column
+        per scenario (listed on a source / own site in search / Wikipedia page);
+      - legacy single: cf['systems'] = {...} → a single After column."""
     cf = record.get("counterfactual")
     if not cf:
         return ""
     brand = _esc(cf.get("brand", "the brand"))
-    anchor = _esc(cf.get("anchor", "a top source"))
     base = cf.get("baseline", {})
+    scenarios = cf.get("scenarios")
+
+    if scenarios:
+        # header: System | Before | <scenario labels…>
+        head = "<tr><th>System</th><th>Before</th>"
+        for sc in scenarios:
+            head += f"<th>{_esc(sc.get('label', sc.get('id', '')))}</th>"
+        head += "</tr>"
+        rows = [head]
+        for key in ("openai", "claude", "surrogate"):
+            b = base.get(key, {})
+            cells = [f"<td>{_CF_SYS_LABELS[key]}</td>",
+                     f"<td>{_cf_cell(b.get('ranked'), b.get('hit'), False)}</td>"]
+            for sc in scenarios:
+                a = sc.get("systems", {}).get(key, {})
+                cells.append(f"<td>{_cf_cell(a.get('ranked'), a.get('hit'), True)}</td>")
+            rows.append("<tr>" + "".join(cells) + "</tr>")
+        sub = (f"A projection, not a measurement. For each what-if we re-asked all "
+               f"three models — using {brand}'s real data — to rank the genuinely "
+               f"best options and include {brand} only if it then belongs. "
+               f"<b>Before</b> is today's answer; each column is one improvement "
+               f"{brand} could make.")
+        return (
+            "<div class='chart cf'>"
+            f"<div class='charthd'>What would actually move the needle for {brand}?</div>"
+            f"<div class='chartsub'>{sub}</div>"
+            f"<table class='cftab'>{''.join(rows)}</table></div>"
+        )
+
+    # legacy single-scenario shape
+    anchor = _esc(cf.get("anchor", "a top source"))
     sysd = cf.get("systems", {})
-    labels = {"openai": "ChatGPT", "claude": "Claude", "surrogate": "Our surrogate"}
-
-    def cell(ranked, hit, after):
-        if not hit:
-            return ("<span class='cf-no'>still absent</span>" if after
-                    else "<span class='cf-no'>absent</span>")
-        pos = next((i + 1 for i, x in enumerate(ranked or [])
-                    if str(x).lower() == str(hit).lower()), None)
-        where = f" (#{pos})" if pos else ""
-        mark = "&#10003; " if after else ""
-        cls = "cf-yes" if after else "cf-mid"
-        return f"<span class='{cls}'>{mark}appears{where}</span>"
-
     rows = ["<tr><th>System</th><th>Before</th><th>After</th></tr>"]
     for key in ("openai", "claude", "surrogate"):
         b = base.get(key, {})
         a = sysd.get(key, {})
         rows.append(
-            f"<tr><td>{labels[key]}</td>"
-            f"<td>{cell(b.get('ranked'), b.get('hit'), False)}</td>"
-            f"<td>{cell(a.get('ranked'), a.get('hit'), True)}</td></tr>"
+            f"<tr><td>{_CF_SYS_LABELS[key]}</td>"
+            f"<td>{_cf_cell(b.get('ranked'), b.get('hit'), False)}</td>"
+            f"<td>{_cf_cell(a.get('ranked'), a.get('hit'), True)}</td></tr>"
         )
     return (
         "<div class='chart cf'>"
@@ -469,6 +548,29 @@ def _google_field_for(name: str, ranks: list[dict], field: str):
     return min(found) if found else None
 
 
+def _google_best(name: str, ranks: list[dict], field: str, url_field: str):
+    """(position, url) of the lowest-ranked classic_rank entry that collapse-
+    matches `name` on `field`; (None, None) if absent. `url_field` is the URL
+    that goes with that position (e.g. 'mention_url' for 'mention')."""
+    nc = _collapse(name)
+    if not nc:
+        return (None, None)
+    best = None
+    for r in ranks:
+        rc = _collapse(r.get("brand", ""))
+        if rc and (nc in rc or rc in nc) and r.get(field):
+            if best is None or r[field] < best[0]:
+                best = (r[field], r.get(url_field))
+    return best or (None, None)
+
+
+def _short_domain(url: str) -> str:
+    """Display host for a URL, e.g. 'https://www.healthline.com/x' -> 'healthline.com'."""
+    m = re.search(r"https?://([^/]+)", url or "")
+    d = (m.group(1) if m else (url or "")).lower()
+    return d[4:] if d.startswith("www.") else d
+
+
 def classic_search_html(record: dict) -> str:
     """#6 — how each AI-recommended brand fares in classic Google search, two
     ways: where its OWN website ranks, and where it is first NAMED by any source
@@ -493,40 +595,47 @@ def classic_search_html(record: dict) -> str:
     consensus = _brand_consensus(systems, matches, top_n=50)
     rows = []
     for i, (name, _cnt) in enumerate(consensus):
-        own = _google_field_for(name, cr["ranks"], "position")
-        men = _google_field_for(name, cr["ranks"], "mention")
-        if i < 12 or own or men:
+        own = _google_best(name, cr["ranks"], "position", "url")
+        men = _google_best(name, cr["ranks"], "mention", "mention_url")
+        if i < 12 or own[0] or men[0]:
             rows.append((name, own, men,
                          bool(bc_track) and bc_track in _collapse(name)))
     # tracked brand: ensure a row even if no system surfaced it
     if bc_track and not any(r[3] for r in rows):
         rows.append((brand,
-                     _google_field_for(brand, cr["ranks"], "position"),
-                     _google_field_for(brand, cr["ranks"], "mention"),
+                     _google_best(brand, cr["ranks"], "position", "url"),
+                     _google_best(brand, cr["ranks"], "mention", "mention_url"),
                      True))
 
     # sort by own-site rank, then first-mention rank; absent sinks to the bottom
     def sort_key(row):
         _, own, men, _t = row
-        return (0 if own else 1, own or 10**6, 0 if men else 1, men or 10**6)
+        return (0 if own[0] else 1, own[0] or 10**6,
+                0 if men[0] else 1, men[0] or 10**6)
     rows.sort(key=sort_key)
 
-    def cell(pos):
-        return (f"<span class='cr-rank'>#{pos}</span>" if pos
-                else f"<span class='cr-none'>— not in top {depth}</span>")
+    def cell(pos, url=None):
+        if not pos:
+            return f"<span class='cr-none'>— not in top {depth}</span>"
+        out = f"<span class='cr-rank'>#{pos}</span>"
+        if url:
+            out += (f" <a class='cr-src' href='{_esc(url)}' target='_blank' "
+                    f"rel='noopener'>{_esc(_short_domain(url))}</a>")
+        return out
 
     trs = ["<tr><th>Brand</th><th>Own website</th><th>First mentioned</th></tr>"]
     for name, own, men, is_track in rows:
         nm = _esc(name) + (" <span class='cr-you'>(you)</span>" if is_track else "")
         cls = " class='cr-track'" if is_track else ""
-        trs.append(f"<tr{cls}><td>{nm}</td><td>{cell(own)}</td><td>{cell(men)}</td></tr>")
+        trs.append(f"<tr{cls}><td>{nm}</td><td>{cell(*own)}</td>"
+                   f"<td>{cell(*men)}</td></tr>")
 
     engine_note = ("real Google organic positions" if cr.get("engine") == "serper"
                    else "web-search ranking, Google-class index")
     sub = (f"Where each AI-recommended brand appears in {_esc(label)} for this "
            f"query ({engine_note}, top {depth}). <b>Own website</b>: where its "
            f"own site ranks. <b>First mentioned</b>: the first article that names "
-           f"it. A dash means neither.")
+           f"it (click the source to see where). A dash means neither.")
     return (
         "<div class='chart'>"
         f"<div class='charthd'>Where these brands appear in classic {_esc(label)} search</div>"
@@ -571,6 +680,9 @@ CHART_CSS = """
 .cf-mid { color:#176874; }
 .cf-no { color:#9a9a9a; }
 .crtab .cr-rank { color:#176874; font-weight:700; }
+.crtab .cr-src { font-size:.82rem; color:var(--teal); margin-left:.4rem;
+                 text-decoration:none; border-bottom:1px dotted var(--teal); }
+.crtab .cr-src:hover { color:#176874; }
 .crtab .cr-none { color:#9a9a9a; }
 .crtab .cr-ai { font-weight:700; color:#444; }
 .crtab .cr-dot { display:inline-block; width:.62rem; height:.62rem; border-radius:50%;
