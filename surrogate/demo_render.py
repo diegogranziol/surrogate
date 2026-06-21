@@ -484,7 +484,24 @@ def counterfactual_html(record: dict) -> str:
     scenarios = cf.get("scenarios")
 
     if scenarios:
-        # header: System | Before | <scenario labels…>
+        # Gate: the counterfactual only means something where the brand is
+        # currently ABSENT. Systems that already list it at baseline can't be
+        # "moved in" — showing appears→appears reads as "no help" when really
+        # it's already there. Mark those as "already listed", and if ALL three
+        # already include the brand, skip the table entirely with a clear note.
+        base_hit = {k: bool(base.get(k, {}).get("hit"))
+                    for k in ("openai", "claude", "surrogate")}
+        if all(base_hit.values()):
+            return (
+                "<div class='chart cf'>"
+                f"<div class='charthd'>{brand} already appears for this query</div>"
+                f"<div class='chartsub'>All three systems already include {brand} in "
+                f"their answers here, so the &ldquo;what if it were more "
+                f"discoverable&rdquo; scenarios don&rsquo;t apply &mdash; the "
+                f"before/after projection is only meaningful when {brand} is "
+                f"currently absent.</div></div>"
+            )
+
         head = "<tr><th>System</th><th>Before</th>"
         for sc in scenarios:
             head += f"<th>{_esc(sc.get('label', sc.get('id', '')))}</th>"
@@ -495,14 +512,20 @@ def counterfactual_html(record: dict) -> str:
             cells = [f"<td>{_CF_SYS_LABELS[key]}</td>",
                      f"<td>{_cf_cell(b.get('ranked'), b.get('hit'), False)}</td>"]
             for sc in scenarios:
-                a = sc.get("systems", {}).get(key, {})
-                cells.append(f"<td>{_cf_cell(a.get('ranked'), a.get('hit'), True)}</td>")
+                if base_hit[key]:
+                    # already present at baseline → scenario is moot for this row
+                    cells.append("<td><span class='cf-already'>already listed</span></td>")
+                else:
+                    a = sc.get("systems", {}).get(key, {})
+                    cells.append(f"<td>{_cf_cell(a.get('ranked'), a.get('hit'), True)}</td>")
             rows.append("<tr>" + "".join(cells) + "</tr>")
         sub = (f"A projection, not a measurement. For each what-if we re-asked all "
                f"three models — using {brand}'s real data — to rank the genuinely "
                f"best options and include {brand} only if it then belongs. "
                f"<b>Before</b> is today's answer; each column is one improvement "
-               f"{brand} could make.")
+               f"{brand} could make. Rows where {brand} already appears are marked "
+               f"&ldquo;already listed&rdquo; (the projection can&rsquo;t add what&rsquo;s "
+               f"already there).")
         return (
             "<div class='chart cf'>"
             f"<div class='charthd'>What would actually move the needle for {brand}?</div>"
@@ -644,6 +667,78 @@ def classic_search_html(record: dict) -> str:
     )
 
 
+def _brand_pos(brand: str, ranked: list) -> int | None:
+    """1-based position of `brand` in `ranked` (collapse-matched), else None."""
+    bc = _collapse(brand)
+    if not bc:
+        return None
+    for i, x in enumerate(ranked or []):
+        xc = _collapse(x)
+        if xc and (bc in xc or xc in bc):
+            return i + 1
+    return None
+
+
+def fidelity_html(record: dict) -> str:
+    """How closely the surrogate mirrors the frontiers for THIS query. Shows the
+    surrogate↔ChatGPT and surrogate↔Claude pick overlap against the ChatGPT↔Claude
+    'reference' (how much the frontiers agree with each other — the honest
+    yardstick, since these rankings are subjective), an interpretive verdict, and
+    where the tracked brand lands across the three. Deterministic (uses the
+    judge's match counts already in the record)."""
+    m = record.get("matches", {}) or {}
+    sysd = record.get("systems", {}) or {}
+    brand = record.get("brand", "")
+    so, sc, oc = (m.get("sur_openai") or {}, m.get("sur_claude") or {},
+                  m.get("openai_claude") or {})
+    if not (so and sc):
+        return ""
+    so_ov, sc_ov, oc_ov = (so.get("overlap") or 0, sc.get("overlap") or 0,
+                           oc.get("overlap") or 0)
+    oc_n = len(oc.get("a") or []) or 0
+
+    best_sf = max(so_ov, sc_ov)
+    if oc_ov == 0:
+        verdict = (f"Even ChatGPT and Claude share no picks for this query, so "
+                   f"there is no single &ldquo;correct&rdquo; ranking to match. "
+                   f"The surrogate overlaps {so_ov} with ChatGPT and {sc_ov} with "
+                   f"Claude.")
+    elif best_sf >= oc_ov:
+        verdict = (f"These rankings are subjective &mdash; ChatGPT and Claude "
+                   f"themselves agree on only {oc_ov}. The surrogate matches at "
+                   f"least one frontier as closely as the frontiers match each "
+                   f"other ({so_ov} with ChatGPT, {sc_ov} with Claude).")
+    elif best_sf == 0:
+        verdict = (f"The surrogate picked a different set here &mdash; no overlap "
+                   f"with either frontier (though the frontiers themselves share "
+                   f"only {oc_ov} of {oc_n}). A candidate for tuning on this "
+                   f"category.")
+    else:
+        verdict = (f"These rankings are subjective &mdash; even ChatGPT and Claude "
+                   f"share only {oc_ov}. The surrogate is close but a bit lower "
+                   f"({so_ov} with ChatGPT, {sc_ov} with Claude).")
+
+    pos = {k: _brand_pos(brand, sysd.get(k, {}).get("ranked"))
+           for k in ("surrogate", "openai", "claude")}
+    lab = {"surrogate": "surrogate", "openai": "ChatGPT", "claude": "Claude"}
+    present = [k for k in ("surrogate", "openai", "claude") if pos[k]]
+    bn = ""
+    if brand and len(present) == 3:
+        bn = f"<b>All three rank {_esc(brand)} in their top {max(pos.values())}.</b>"
+    elif brand and present:
+        bits = ", ".join(f"{lab[k]} #{pos[k]}" for k in present)
+        bn = f"{_esc(brand)} appears in {bits}."
+    elif brand:
+        bn = f"No system surfaced {_esc(brand)} for this query."
+    bn_html = f"<div class='fid-brand'>{bn}</div>" if bn else ""
+
+    return (
+        "<div class='chart chart-wide'>"
+        "<div class='charthd'>How closely the surrogate mirrors the frontiers</div>"
+        f"<div class='chartsub'>{verdict}</div>{bn_html}</div>"
+    )
+
+
 def graph_panels(record: dict) -> list[str]:
     """Registry: return the HTML for every graph applicable to this run, in
     display order. Always-on graphs render for any question; conditional ones
@@ -653,6 +748,7 @@ def graph_panels(record: dict) -> list[str]:
     brand = record.get("brand", "")
     cat = f"“{record.get('question', 'this query')}”"
     panels = [
+        fidelity_html(record),
         brand_visibility_html(sysd, matches, brand, category=cat),
         domain_authority_html(sysd.get("openai", {}).get("urls"),
                               sysd.get("claude", {}).get("urls"), category=cat),
@@ -664,6 +760,7 @@ def graph_panels(record: dict) -> list[str]:
 CHART_CSS = """
 .charts-row { display:flex; gap:1.2rem; flex-wrap:wrap; align-items:flex-start; margin:1.4rem 0; }
 .charts-row > .chart { flex:1 1 380px; min-width:300px; margin:0; }
+.charts-row > .chart-wide { flex:1 1 100%; }
 .chart { margin:1.4rem 0; padding:1.1rem 1.3rem; background:var(--soft);
          border:1px solid var(--line); border-radius:12px; }
 .charthd { font-family:'Epilogue',sans-serif; font-weight:600; font-size:1.18rem; margin-bottom:.25rem; }
@@ -679,6 +776,9 @@ CHART_CSS = """
 .cf-yes { color:#1B8090; font-weight:700; }
 .cf-mid { color:#176874; }
 .cf-no { color:#9a9a9a; }
+.cf-already { color:#9a9a9a; font-style:italic; }
+.fid-brand { margin-top:.7rem; padding:.55rem .8rem; background:rgba(45,165,182,.10);
+             border-radius:8px; font-size:.9rem; color:#176874; }
 .crtab .cr-rank { color:#176874; font-weight:700; }
 .crtab .cr-src { font-size:.82rem; color:var(--teal); margin-left:.4rem;
                  text-decoration:none; border-bottom:1px dotted var(--teal); }
