@@ -325,11 +325,11 @@ def domain_authority_html(openai_urls, claude_urls, *, top_n: int = 8,
     )
 
 
-def _brand_consensus(systems: dict, matches: dict, *, top_n: int = 9) -> list[tuple]:
-    """Cluster brands across the 3 systems via the judge's matched pairs and
-    count how many systems surface each (0–3). Returns [(display_name, count)]
-    sorted by count desc then name, capped at top_n. Shared by the brand-
-    visibility chart and the classic-rank panel so both show the same brands."""
+def _cluster_brands(systems: dict, matches: dict) -> list[dict]:
+    """Cluster brand mentions across the 3 systems via the judge's matched pairs
+    (union-find). Returns a list of {names: [...], systems: set(...)} — one entry
+    per distinct brand, with the set of systems that surfaced it. Shared by the
+    consensus bar chart, the classic-rank panel, and the Venn diagram."""
     lists = {
         "surrogate": systems.get("surrogate", {}).get("ranked") or [],
         "openai": systems.get("openai", {}).get("ranked") or [],
@@ -381,9 +381,15 @@ def _brand_consensus(systems: dict, matches: dict, *, top_n: int = 9) -> list[tu
         c = comps.setdefault(r, {"systems": set(), "names": []})
         c["systems"].add(info[k]["sys"])
         c["names"].append(info[k]["name"])
+    return list(comps.values())
 
+
+def _brand_consensus(systems: dict, matches: dict, *, top_n: int = 9) -> list[tuple]:
+    """Cluster brands across the 3 systems and count how many surface each (1–3).
+    Returns [(display_name, count)] sorted by count desc then name, capped at
+    top_n. Shared by the brand-visibility chart and the classic-rank panel."""
     entries = [(sorted(c["names"], key=len)[0], len(c["systems"]))
-               for c in comps.values()]
+               for c in _cluster_brands(systems, matches)]
     # collapse display-name duplicates, keep the higher count
     best: dict = {}
     for name, cnt in entries:
@@ -679,6 +685,72 @@ def _brand_pos(brand: str, ranked: list) -> int | None:
     return None
 
 
+def agreement_venn_html(record: dict) -> str:
+    """3-circle Venn of the brand picks: surrogate / ChatGPT / Claude, with the
+    count of brands in each region (unique to one system, shared by two, or by
+    all three). A visual companion to the consensus bar chart — the center is
+    where all three agree. Deterministic; uses the same cross-system clustering."""
+    systems = record.get("systems", {})
+    matches = record.get("matches", {})
+    clusters = _cluster_brands(systems, matches)
+    if not clusters:
+        return ""
+
+    S, O, C = "surrogate", "openai", "claude"
+    reg = {k: 0 for k in ("s", "o", "c", "so", "sc", "oc", "soc")}
+    for cl in clusters:
+        ss = cl["systems"]
+        has_s, has_o, has_c = S in ss, O in ss, C in ss
+        if has_s and has_o and has_c:
+            reg["soc"] += 1
+        elif has_s and has_o:
+            reg["so"] += 1
+        elif has_s and has_c:
+            reg["sc"] += 1
+        elif has_o and has_c:
+            reg["oc"] += 1
+        elif has_s:
+            reg["s"] += 1
+        elif has_o:
+            reg["o"] += 1
+        elif has_c:
+            reg["c"] += 1
+
+    SUR, OAI, CLA = "#2DA5B6", "#E0A33E", "#C2613F"
+    circles = (
+        f"<circle cx='140' cy='130' r='92' fill='{SUR}' fill-opacity='.42' "
+        f"stroke='{SUR}' style='mix-blend-mode:multiply'/>"
+        f"<circle cx='240' cy='130' r='92' fill='{OAI}' fill-opacity='.42' "
+        f"stroke='{OAI}' style='mix-blend-mode:multiply'/>"
+        f"<circle cx='190' cy='210' r='92' fill='{CLA}' fill-opacity='.42' "
+        f"stroke='{CLA}' style='mix-blend-mode:multiply'/>"
+    )
+
+    def num(x, y, n):
+        cls = "vnum" if n else "vnum z"
+        return f"<text x='{x}' y='{y}' class='{cls}'>{n}</text>"
+
+    nums = (
+        num(102, 116, reg["s"]) + num(278, 116, reg["o"]) + num(190, 258, reg["c"])
+        + num(190, 104, reg["so"]) + num(150, 188, reg["sc"]) + num(230, 188, reg["oc"])
+        + num(190, 162, reg["soc"])
+    )
+    labels = (
+        f"<text x='108' y='44' class='vlbl' style='fill:{SUR}'>Surrogate</text>"
+        f"<text x='272' y='44' class='vlbl' style='fill:{OAI}'>ChatGPT</text>"
+        f"<text x='190' y='314' class='vlbl' style='fill:{CLA}'>Claude</text>"
+    )
+    svg = (f"<svg viewBox='0 0 380 320' class='venn' role='img' "
+           f"preserveAspectRatio='xMidYMid meet'>{circles}{nums}{labels}</svg>")
+    sub = ("Each brand placed by which systems recommend it. The center is "
+           "where all three agree; outer slices are brands only one system picks.")
+    return (
+        "<div class='chart'>"
+        "<div class='charthd'>Where the three systems overlap</div>"
+        f"<div class='chartsub'>{sub}</div>{svg}</div>"
+    )
+
+
 def fidelity_html(record: dict) -> str:
     """How closely the surrogate mirrors the frontiers for THIS query. Shows the
     surrogate↔ChatGPT and surrogate↔Claude pick overlap against the ChatGPT↔Claude
@@ -750,6 +822,7 @@ def graph_panels(record: dict) -> list[str]:
     panels = [
         fidelity_html(record),
         brand_visibility_html(sysd, matches, brand, category=cat),
+        agreement_venn_html(record),
         domain_authority_html(sysd.get("openai", {}).get("urls"),
                               sysd.get("claude", {}).get("urls"), category=cat),
         classic_search_html(record),
@@ -779,6 +852,12 @@ CHART_CSS = """
 .cf-already { color:#9a9a9a; font-style:italic; }
 .fid-brand { margin-top:.7rem; padding:.55rem .8rem; background:rgba(45,165,182,.10);
              border-radius:8px; font-size:.9rem; color:#176874; }
+.venn { width:100%; max-width:360px; height:auto; display:block; margin:.2rem auto 0; }
+.venn .vnum { font-family:'Mulish',sans-serif; font-size:20px; font-weight:700;
+              fill:#2A2A2A; text-anchor:middle; dominant-baseline:central; }
+.venn .vnum.z { fill:#B9B9B9; font-weight:600; }
+.venn .vlbl { font-family:'Epilogue',sans-serif; font-size:13px; font-weight:700;
+              text-anchor:middle; }
 .crtab .cr-rank { color:#176874; font-weight:700; }
 .crtab .cr-src { font-size:.82rem; color:var(--teal); margin-left:.4rem;
                  text-decoration:none; border-bottom:1px dotted var(--teal); }
