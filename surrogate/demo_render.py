@@ -240,7 +240,8 @@ TRAJECTORY_CSS = """
 .vf-no { background:rgba(212,55,71,.12); color:#b02a38; }
 .srcdata { display:none; }
 /* floating popover, anchored to the clicked phrase */
-.pop { position:fixed; display:none; z-index:9999; max-width:440px;
+.pop { position:fixed; display:none; z-index:9999; max-width:520px;
+       max-height:72vh; overflow:auto;
        background:#fff; border:1px solid var(--line); border-top:3px solid var(--teal);
        border-radius:10px; box-shadow:0 14px 44px rgba(0,0,0,.22);
        padding:.9rem 1.1rem; animation:pop .12s ease-out; }
@@ -475,26 +476,100 @@ def _cf_cell(ranked, hit, after):
     return f"<span class='{cls}'>{mark}appears{where}</span>"
 
 
-def counterfactual_html(record: dict) -> str:
+def _cf_assumption(sid: str, brand: str, anchor: str) -> str:
+    """Plain-language description of the assumption we fed the model for a
+    scenario — shown in the click-through popover so the client sees exactly
+    what we posed, not a black box."""
+    if sid == "listing":
+        return (f"Assume {brand} now appears on {anchor} (a third-party "
+                f"directory/review platform for this category).")
+    if sid == "ownsite":
+        return (f"Assume {brand}'s own website now ranks on the first page of "
+                f"search results for this query.")
+    if sid == "wikipedia":
+        return (f"Assume {brand} now has its own dedicated Wikipedia article.")
+    return f"Assume {brand} were more discoverable for this query."
+
+
+def _cf_traj_inline(traj: list[dict]) -> str:
+    """Compact, read-only step-by-step view of the surrogate's reasoning for a
+    counterfactual run, for inside the popover (no nested click-to-reveal — the
+    sources are listed inline per step)."""
+    parts = []
+    for s in traj or []:
+        n = (s.get("step", 0) or 0) + 1
+        think = _esc((s.get("think") or "").strip()).replace("\n", " ")
+        icon = _TOOL_ICON.get(s.get("tool"), "&#8226;")
+        action = _esc(s.get("action") or "")
+        urls = s.get("urls") or []
+        links = "".join(
+            f"<li><a href='{_esc(u)}' target='_blank' rel='noopener'>{_esc(u)}</a></li>"
+            for u in urls)
+        links = f"<ul class='cfstep-src'>{links}</ul>" if links else ""
+        act = f"<div class='cfstep-act'>{icon} {action}</div>" if action else ""
+        ev = _evidence_html(s)
+        parts.append(
+            f"<div class='cfstep'><span class='cfstep-n'>{n}</span>"
+            f"<div class='cfstep-b'>{think}{act}{ev}{links}</div></div>"
+        )
+    return "".join(parts)
+
+
+def counterfactual_html(record: dict, id_prefix: str = "") -> str:
     """Counterfactual 'what if <brand> were more discoverable' panel. Returns ''
-    when the run has no counterfactual block (it's an optional, GPU-produced
-    extra). Always clearly labelled as a projection. Handles two shapes:
-      - multi-scenario: cf['scenarios'] = [{id,label,systems}, …] → one column
-        per scenario (listed on a source / own site in search / Wikipedia page);
-      - legacy single: cf['systems'] = {...} → a single After column."""
+    when the run has no counterfactual block. Always labelled as a projection.
+
+    Each scenario cell (where the brand was absent at baseline) is clickable: it
+    opens the same anchored popover as the reasoning timeline, showing the exact
+    assumption we posed and the model's verbatim re-answer — so the client can
+    see we re-ran the model, not invented the result. `id_prefix` namespaces the
+    popover IDs so several examples can coexist (the static demo embeds many).
+
+    Two shapes: multi-scenario (cf['scenarios']) and legacy single (cf['systems'])."""
     cf = record.get("counterfactual")
     if not cf:
         return ""
     brand = _esc(cf.get("brand", "the brand"))
+    raw_brand = cf.get("brand", "the brand")
+    raw_anchor = cf.get("anchor", "a top source")
     base = cf.get("baseline", {})
     scenarios = cf.get("scenarios")
+
+    # hidden data divs (popover bodies), collected and appended after the table
+    data_divs: list[str] = []
+
+    def clickable(pid_tail, key, label, sysblock, sid, cell_inner):
+        """Wrap a cell so clicking opens the popover with the model's actual
+        output: the surrogate's step-by-step reasoning when we captured it,
+        otherwise the verbatim answer. Plain cell when there's nothing stored."""
+        sysblock = sysblock or {}
+        ans = sysblock.get("answer") or ""
+        traj = sysblock.get("trajectory") or []
+        if not ans and not traj:
+            return f"<td>{cell_inner}</td>"
+        pid = f"{id_prefix}cf-{pid_tail}"
+        assume = _cf_assumption(sid, raw_brand, raw_anchor)
+        if key == "surrogate" and traj:
+            body = ("<div class='cfpop-anshd'>Its step-by-step reasoning:</div>"
+                    f"<div class='cfpop-traj'>{_cf_traj_inline(traj)}</div>")
+        else:
+            body = ("<div class='cfpop-anshd'>What it answered (verbatim):</div>"
+                    f"<div class='cfpop-ans'>{linkify_verbatim(ans)}</div>")
+        data_divs.append(
+            f"<div class='srcdata' id='{pid}'>"
+            f"<div class='cfpop-hd'>{_CF_SYS_LABELS[key]} &middot; {_esc(label)}</div>"
+            f"<div class='cfpop-assume'><b>What we told the model:</b> {_esc(assume)} "
+            f"We then re-asked the original question and told it to include "
+            f"{brand} only if it genuinely belongs.</div>{body}</div>"
+        )
+        return (f"<td><span class='cf-click' onclick=\"openSrc('{pid}',event)\" "
+                f"title='see what {_CF_SYS_LABELS[key]} actually did'>"
+                f"{cell_inner} <span class='cf-i'>&#9432;</span></span></td>")
 
     if scenarios:
         # Gate: the counterfactual only means something where the brand is
         # currently ABSENT. Systems that already list it at baseline can't be
-        # "moved in" — showing appears→appears reads as "no help" when really
-        # it's already there. Mark those as "already listed", and if ALL three
-        # already include the brand, skip the table entirely with a clear note.
+        # "moved in"; if ALL three already include it, skip the table.
         base_hit = {k: bool(base.get(k, {}).get("hit"))
                     for k in ("openai", "claude", "surrogate")}
         if all(base_hit.values()):
@@ -517,26 +592,27 @@ def counterfactual_html(record: dict) -> str:
             b = base.get(key, {})
             cells = [f"<td>{_CF_SYS_LABELS[key]}</td>",
                      f"<td>{_cf_cell(b.get('ranked'), b.get('hit'), False)}</td>"]
-            for sc in scenarios:
+            for si, sc in enumerate(scenarios):
                 if base_hit[key]:
-                    # already present at baseline → scenario is moot for this row
                     cells.append("<td><span class='cf-already'>already listed</span></td>")
                 else:
                     a = sc.get("systems", {}).get(key, {})
-                    cells.append(f"<td>{_cf_cell(a.get('ranked'), a.get('hit'), True)}</td>")
+                    inner = _cf_cell(a.get("ranked"), a.get("hit"), True)
+                    cells.append(clickable(f"{key}-{si}", key,
+                                           sc.get("label", sc.get("id", "")),
+                                           a, sc.get("id", ""), inner))
             rows.append("<tr>" + "".join(cells) + "</tr>")
         sub = (f"A projection, not a measurement. For each what-if we re-asked all "
                f"three models — using {brand}'s real data — to rank the genuinely "
                f"best options and include {brand} only if it then belongs. "
                f"<b>Before</b> is today's answer; each column is one improvement "
-               f"{brand} could make. Rows where {brand} already appears are marked "
-               f"&ldquo;already listed&rdquo; (the projection can&rsquo;t add what&rsquo;s "
-               f"already there).")
+               f"{brand} could make. <b>Click any result to see exactly what we "
+               f"asked and what the model answered.</b>")
         return (
             "<div class='chart cf'>"
             f"<div class='charthd'>What would actually move the needle for {brand}?</div>"
             f"<div class='chartsub'>{sub}</div>"
-            f"<table class='cftab'>{''.join(rows)}</table></div>"
+            f"<table class='cftab'>{''.join(rows)}</table>{''.join(data_divs)}</div>"
         )
 
     # legacy single-scenario shape
@@ -558,6 +634,25 @@ def counterfactual_html(record: dict) -> str:
         f"{brand} appears on {anchor}, using {brand}'s real data, and to include "
         f"it only if it genuinely ranks.</div>"
         f"<table class='cftab'>{''.join(rows)}</table></div>"
+    )
+
+
+def counterfactual_component_html(record: dict) -> str:
+    """Self-contained HTML doc for st.components.v1.html: the counterfactual
+    panel with its click-through popover working. Streamlit's main page can't
+    run the inline popover JS, so (like the reasoning timeline) we render it in
+    an isolated iframe that carries its own CSS, overlay, and JS. Returns '' when
+    there's no counterfactual block."""
+    inner = counterfactual_html(record)
+    if not inner:
+        return ""
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'>"
+        "<link href='https://fonts.googleapis.com/css2?family=Epilogue:wght@500;600;700&family=Mulish:wght@400;600;700&display=swap' rel='stylesheet'>"
+        "<style>html,body{margin:0;}"
+        "body{font-family:'Mulish',sans-serif;color:#1A1A1A;padding:.2rem .4rem;}"
+        f"{CHART_CSS}{TRAJECTORY_CSS}</style></head><body>"
+        f"{inner}{OVERLAY_HTML}<script>{TRAJECTORY_JS}</script></body></html>"
     )
 
 
@@ -820,7 +915,8 @@ def graph_panels(record: dict) -> list[str]:
     brand = record.get("brand", "")
     cat = f"“{record.get('question', 'this query')}”"
     panels = [
-        fidelity_html(record),
+        # fidelity_html(record),  # methodology/credibility, not client-facing —
+        # kept in code for a possible internal "is the surrogate faithful?" view.
         brand_visibility_html(sysd, matches, brand, category=cat),
         agreement_venn_html(record),
         domain_authority_html(sysd.get("openai", {}).get("urls"),
@@ -850,6 +946,25 @@ CHART_CSS = """
 .cf-mid { color:#176874; }
 .cf-no { color:#9a9a9a; }
 .cf-already { color:#9a9a9a; font-style:italic; }
+.cf-click { cursor:pointer; border-bottom:1px dashed var(--teal); padding-bottom:1px; }
+.cf-click:hover { background:rgba(45,165,182,.12); }
+.cf-i { color:var(--teal); font-size:.85em; }
+.cfpop-hd { font-family:'Epilogue',sans-serif; font-weight:700; color:#176874;
+            margin-bottom:.45rem; }
+.cfpop-assume { font-size:.84rem; color:#444; background:var(--soft);
+                border-radius:6px; padding:.45rem .6rem; margin-bottom:.6rem; }
+.cfpop-anshd { font-size:.7rem; text-transform:uppercase; letter-spacing:.05em;
+               color:#888; margin-bottom:.25rem; }
+.cfpop-ans { font-size:.85rem; line-height:1.45; color:#1f1f1f; }
+.cfpop-traj { font-size:.82rem; }
+.cfstep { display:flex; gap:.5rem; padding:.4rem 0; border-bottom:1px solid var(--line); }
+.cfstep-n { flex:0 0 1.3rem; height:1.3rem; border-radius:999px; background:var(--teal);
+            color:#fff; font-size:.7rem; font-weight:700; display:flex;
+            align-items:center; justify-content:center; }
+.cfstep-b { flex:1; min-width:0; line-height:1.4; color:#333; }
+.cfstep-act { color:#6B6B6B; font-weight:600; margin-top:.2rem; }
+.cfstep-src { margin:.25rem 0 0; padding-left:1rem; }
+.cfstep-src li { font-size:.79rem; margin-bottom:.15rem; }
 .fid-brand { margin-top:.7rem; padding:.55rem .8rem; background:rgba(45,165,182,.10);
              border-radius:8px; font-size:.9rem; color:#176874; }
 .venn { width:100%; max-width:360px; height:auto; display:block; margin:.2rem auto 0; }

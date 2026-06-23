@@ -21,6 +21,6 @@ demo.zip
 
 # Personal / deploy / FTP artifacts — keep on disk, never push.
 handoff.md
-static_demo/avea.html
+static_demo/avea*.html
 static_demo/.ftpquota
 static_demo/ftpcheck-*.txt

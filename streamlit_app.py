@@ -505,15 +505,21 @@ if page == "Ask":
 
             # --- graph panels (brand visibility + domain authority …) ---------
             from surrogate.demo_render import (
-                graph_panels, counterfactual_html, CHART_CSS,
+                graph_panels, counterfactual_component_html, CHART_CSS,
             )
+            import streamlit.components.v1 as _components
             _panels = graph_panels(rec)
-            _cf = counterfactual_html(rec)
-            if _panels or _cf:
-                _row = (f"<div class='charts-row'>{''.join(_panels)}</div>"
-                        if _panels else "")
-                st.markdown(f"<style>{CHART_CSS}</style>{_row}{_cf}",
-                            unsafe_allow_html=True)
+            if _panels:
+                st.markdown(
+                    f"<style>{CHART_CSS}</style>"
+                    f"<div class='charts-row'>{''.join(_panels)}</div>",
+                    unsafe_allow_html=True)
+            # Counterfactual rendered as an isolated component so its
+            # click-through popover (assumption + verbatim re-answer) works —
+            # Streamlit's main page can't run the inline JS.
+            _cf_doc = counterfactual_component_html(rec)
+            if _cf_doc:
+                _components.html(_cf_doc, height=540, scrolling=True)
 
             # Surrogate trajectory is rendered lower (just before the full
             # answers) — it's dense, surrogate-specific detail. Captured here

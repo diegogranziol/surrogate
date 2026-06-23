@@ -663,19 +663,28 @@ def _counterfactual_suffix(brand: str, blurb: str, scenario: str,
 
 def _cf_run_models(aug: str, brand: str, k: int, mode: str) -> dict:
     """Run one augmented question across all three models in parallel; return
-    {system: {model, ranked, answer, hit}}."""
+    {system: {model, ranked, answer, hit, [trajectory]}}. The surrogate block
+    also carries its step-by-step `trajectory` (parsed from the run bundle) so
+    the counterfactual popover can show its reasoning, not just the answer."""
     def _sur():
         sur = loop_run(aug, tools=default_tools())
         ans = sur.final_answer or ""
-        return ("qwen3-32b (surrogate)", extract_pick_topN(ans, k=k)["ranked"], ans)
+        bundle = str(sur.bundle_dir) if sur.bundle_dir else None
+        return {"model": "qwen3-32b (surrogate)",
+                "ranked": extract_pick_topN(ans, k=k)["ranked"],
+                "answer": ans, "trajectory": surrogate_trajectory(bundle)}
 
     def _oai():
         r = ask_openai(aug, mode=mode)
-        return (r["model"], extract_pick_topN(r["answer"], k=k)["ranked"], r["answer"])
+        return {"model": r["model"],
+                "ranked": extract_pick_topN(r["answer"], k=k)["ranked"],
+                "answer": r["answer"]}
 
     def _cla():
         r = ask_claude(aug, mode=mode)
-        return (r["model"], extract_pick_topN(r["answer"], k=k)["ranked"], r["answer"])
+        return {"model": r["model"],
+                "ranked": extract_pick_topN(r["answer"], k=k)["ranked"],
+                "answer": r["answer"]}
 
     out: dict = {}
     with ThreadPoolExecutor(max_workers=3) as ex:
@@ -683,9 +692,9 @@ def _cf_run_models(aug: str, brand: str, k: int, mode: str) -> dict:
                 "openai": ex.submit(_oai),
                 "claude": ex.submit(_cla)}
         for name, fut in futs.items():
-            model, ranked, answer = fut.result()
-            out[name] = {"model": model, "ranked": ranked, "answer": answer,
-                         "hit": brand_hit(ranked, brand)}
+            d = fut.result()
+            d["hit"] = brand_hit(d["ranked"], brand)
+            out[name] = d
     return out
 
 

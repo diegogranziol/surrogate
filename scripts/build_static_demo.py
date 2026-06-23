@@ -216,8 +216,9 @@ def render_results(rec: dict, id_prefix: str = "") -> str:
     # ones) sit right after the suggestions card, side by side, as evidence.
     _panels = graph_panels(rec)
     charts = f"<div class='charts-row'>{''.join(_panels)}</div>" if _panels else ""
-    # before/after counterfactual panel (empty until a GPU run produces it)
-    charts += counterfactual_html(rec)
+    # before/after counterfactual panel. id_prefix namespaces its click-through
+    # popover IDs so multiple embedded examples don't collide.
+    charts += counterfactual_html(rec, id_prefix=id_prefix)
 
     # The surrogate trajectory now lives inside the Full answers section (as the
     # surrogate's reasoning), so it's not a standalone block here.
@@ -257,7 +258,7 @@ def build(fixtures: list[Path] | Path = FIXTURE) -> str:
     )
     selector = (
         "<label class='q' for='qsel'>Your question</label>"
-        f"<select id='qsel' class='qsel'>{options}</select>"
+        f"<select id='qsel' class='qsel' onchange='showExample(this.value)'>{options}</select>"
     ) if len(recs) > 1 else (
         "<label class='q' for='qsel'>Your question</label>"
         f"<input type='text' id='qsel' value=\"{esc(recs[0].get('question',''))}\" readonly />"
@@ -338,36 +339,35 @@ _TEMPLATE = """<!DOCTYPE html>
   {selector}
   <label class="q" for="b" style="margin-top:1rem;">Brand to track</label>
   <input type="text" id="b" value="Avea" />
-  <button class="btn" type="button" id="runbtn">Run</button>
+  <button class="btn" type="button" id="runbtn" onclick="runDemo()">Run</button>
 
   <div id="results">{examples}</div>
 </div>
 <script>
-/* Question selector + Run button. Bound in its own script so a later error
-   can't disable it; scroll is guarded (iOS WebKit can throw on the options
-   form). Only the selected example is shown; switching swaps it in place. */
-(function(){{
-  var sel=document.getElementById('qsel');
+/* Inline onclick/onchange + global functions: the most reliable binding on
+   iOS (no dependency on an init script having run). Selecting a question OR
+   tapping Run both reveal + swap the example, so the demo works even if one
+   path misbehaves. Scroll is guarded (older iOS WebKit throws on the options
+   form). */
+function showExample(key){{
   var results=document.getElementById('results');
-  function show(key){{
-    var ex=results.querySelectorAll('.example');
-    for(var i=0;i<ex.length;i++){{
-      ex[i].style.display = (ex[i].getAttribute('data-key')===key)?'block':'none';
-    }}
+  if(!results) return;
+  var ex=results.querySelectorAll('.example');
+  for(var i=0;i<ex.length;i++){{
+    ex[i].style.display = (ex[i].getAttribute('data-key')===key)?'block':'none';
   }}
-  if(sel && sel.tagName==='SELECT'){{
-    sel.addEventListener('change', function(){{ show(this.value); }});
-  }}
+  results.style.display='block';   /* selecting alone is enough to show it */
+}}
+function runDemo(){{
+  var sel=document.getElementById('qsel');
+  var key = (sel && sel.value) ? sel.value : null;
+  if(key){{ showExample(key); }}
+  var results=document.getElementById('results');
+  if(results){{ results.style.display='block'; }}
   var b=document.getElementById('runbtn');
-  if(b){{
-    b.addEventListener('click', function(){{
-      if(sel && sel.value){{ show(sel.value); }}
-      if(results) results.style.display='block';
-      try{{ b.scrollIntoView({{behavior:'smooth'}}); }}
-      catch(e){{ try{{ b.scrollIntoView(); }}catch(_){{}} }}
-    }});
-  }}
-}})();
+  if(b){{ try{{ b.scrollIntoView({{behavior:'smooth'}}); }}
+          catch(e){{ try{{ b.scrollIntoView(); }}catch(_){{}} }} }}
+}}
 </script>
 {overlay}
 <script>{traj_js}</script>
