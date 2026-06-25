@@ -1,17 +1,17 @@
 """Streamlit UI for the surrogate deep-research agent.
 
-Tabs:
-  • Ingest / Documents — manage a local user-RAG store (sentence-transformers
-    over SQLite). Not used by the deep-research agent below; kept available
-    for retrieve-only queries and future composition.
-  • Ask — ask a question. Two modes:
-      - Retrieve only: cosine search over the user-RAG store (no model call).
-      - Surrogate: single-stage ReAct loop, 7 tools (search, fetch_url,
-        extract_entity, verify_fact, check_missing_fields, think,
-        stop_and_answer). Visible <think> reasoning between tool calls.
-        Optional side-by-side comparison vs GLM-4.6 on the SAME evidence.
-  • Compare two URLs — DOM-pair flow (Stage 2 bypassed).
-  • Settings — box/tunnel/reference-model config.
+Demo-first layout: the app opens directly on the Ask page (sidebar collapsed).
+Operator pages (Ingest, Documents, Compare two URLs, Settings) are hidden
+behind the "Operator tools" toggle in the sidebar so a client demo only ever
+sees Ask.
+
+Ask modes:
+  - Compare (default, the demo): one question through the surrogate + ChatGPT
+    + Claude in parallel; ranked-picks table with brand-level match ticks,
+    "what should <brand> do" suggestions, sources consulted.
+  - Surrogate: single-stage ReAct loop, 7 tools, visible <think> reasoning.
+    Optional side-by-side vs GLM-4.6 on the SAME evidence.
+  - Retrieve only: cosine search over the local user-RAG store.
 
 Run:
     streamlit run streamlit_app.py
@@ -25,30 +25,219 @@ import traceback
 
 import streamlit as st
 
-from surrogate.rag import (
-    delete_doc, ingest_text, ingest_url, list_docs, retrieve,
+# NOTE: surrogate.rag pulls sentence-transformers/torch (heavy). It's only
+# needed by the operator pages (Ingest/Documents) and Retrieve-only mode, so
+# we import it lazily inside those blocks. This keeps the Compare/Test-mode
+# demo — and a lightweight cloud deploy — from loading torch at startup.
+
+def _need_rag():
+    """Lazy-import the RAG module; show a friendly note on torch-free deploys."""
+    try:
+        import surrogate.rag as _rag
+        return _rag
+    except Exception as e:
+        st.info(
+            "This page needs the embedding extras (sentence-transformers), "
+            "which aren't installed on the lightweight demo build. Run "
+            "`pip install -r requirements-rag.txt` locally to enable it.",
+            icon="ℹ️",
+        )
+        st.caption(f"import detail: {e!r}")
+        st.stop()
+
+# On Streamlit Community Cloud, API keys are set in the dashboard's Secrets.
+# Our frontier clients read os.environ, so bridge any secrets across. No-op
+# locally (.env handles it) and in Test mode (no keys needed).
+try:
+    for _k in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "TAVILY_API_KEY",
+               "ZAI_API_KEY", "FRONTIER_OPENAI_MODEL", "FRONTIER_CLAUDE_MODEL"):
+        if _k in st.secrets and not os.environ.get(_k):
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
+
+st.set_page_config(
+    page_title="AVEA · AI Visibility",
+    page_icon="🧬",
+    layout="wide",
+    initial_sidebar_state="collapsed",
 )
 
-st.set_page_config(page_title="Surrogate · Deep-Research Agent", layout="wide")
-st.title(
-    "Surrogate · Deep-Research Agent",
-    help=(
-        "Open-source surrogate of a frontier deep-research assistant. Single "
-        "ReAct loop on Qwen3-8B with 7 tools (search, fetch_url, "
-        "extract_entity, verify_fact, check_missing_fields, think, "
-        "stop_and_answer). Visible <think> reasoning between every tool call. "
-        "Compare side-by-side against GLM-4.6 on the same evidence to "
-        "measure reasoning fidelity."
-    ),
+# ---- Avea-life brand layer (palette + type pulled from avea-life.com) -------
+st.markdown(
+    """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Epilogue:wght@500;600;700&family=Mulish:wght@400;500;600;700&display=swap');
+
+html, body, .stMarkdown, p, li, label, input, textarea, button {
+    font-family: 'Mulish', sans-serif;
+}
+h1, h2, h3, h4 { font-family: 'Epilogue', sans-serif !important; letter-spacing: -0.01em; }
+
+/* keep Streamlit's Material Symbols icons on their icon font (otherwise the
+   ligature name renders as literal text, e.g. "keyboard_double_arrow_right") */
+[data-testid="stIconMaterial"],
+[class*="material-symbols"],
+span[translate="no"] {
+    font-family: 'Material Symbols Rounded' !important;
+}
+
+/* hide default streamlit chrome for a clean demo */
+#MainMenu, footer { visibility: hidden; }
+[data-testid="stDecoration"] { display: none; }
+.stAppDeployButton, [data-testid="stAppDeployButton"] { display: none !important; }
+
+/* readable content width, centered — like avea-life.com's page container */
+.block-container,
+[data-testid="stMainBlockContainer"] {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding-top: 4.2rem;   /* clear streamlit's fixed top bar (~3.75rem) */
+    padding-left: 2rem;
+    padding-right: 2rem;
+}
+/* When the sidebar is collapsed, make the main area reclaim the full width so
+   the centered block sits in the true viewport center. Without this Streamlit
+   1.57 can leave residual left space, making the content look shifted right. */
+section[data-testid="stMain"] {
+    width: 100% !important;
+    margin-left: 0 !important;
+}
+
+/* widget labels ("Your question", "Mode", "Brand to track", …) */
+[data-testid="stWidgetLabel"] p,
+[data-testid="stWidgetLabel"] label {
+    font-size: 1.12rem !important;
+    font-weight: 600;
+    color: #222;
+}
+
+.avea-header {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1.2rem; margin: 0 0 2.4rem 0;
+    font-family: 'Epilogue', sans-serif; font-weight: 600;
+    font-size: 1.45rem; letter-spacing: .04em;
+}
+.avea-header img { height: 2.4rem; display: block; }
+.avea-header .accent { color: #2DA5B6; }
+
+/* section rhythm: larger titles, more air between blocks */
+[data-testid="stMainBlockContainer"] h2 {
+    font-size: 1.7rem; margin: 2.2rem 0 .9rem 0;
+}
+[data-testid="stMainBlockContainer"] h3 {
+    font-size: 1.45rem; margin: 2.0rem 0 .8rem 0;
+}
+[data-testid="stMainBlockContainer"] h4 {
+    font-size: 1.18rem; margin: 1.6rem 0 .6rem 0;
+}
+[data-testid="stExpander"] { margin-top: 1.2rem; }
+[data-testid="stExpander"] summary span,
+[data-testid="stExpander"] summary p {
+    font-size: 1.05rem; font-weight: 600;
+}
+
+/* primary button -> avea pill (covers normal + form-submit buttons) */
+.stButton > button[kind="primary"],
+[data-testid="stFormSubmitButton"] > button {
+    background: #2DA5B6; border: none; border-radius: 999px;
+    padding: .5rem 1.8rem; font-weight: 700; letter-spacing: .02em;
+    color: #fff;
+}
+.stButton > button[kind="primary"]:hover,
+[data-testid="stFormSubmitButton"] > button:hover { background: #238D9C; }
+
+/* markdown tables -> branded */
+[data-testid="stMarkdownContainer"] table { width: 100%; border-collapse: collapse; }
+[data-testid="stMarkdownContainer"] th {
+    text-align: left; font-family: 'Epilogue', sans-serif; font-size: .84rem;
+    letter-spacing: .05em; text-transform: uppercase; color: #333;
+    border-bottom: 2px solid #2DA5B6; padding: .5rem .65rem;
+}
+[data-testid="stMarkdownContainer"] td {
+    border-bottom: 1px solid #ECE9E4; padding: .48rem .65rem; font-size: .93rem;
+}
+[data-testid="stMarkdownContainer"] tr:nth-child(even) td { background: #FAF9F7; }
+
+/* suggestions card */
+.avea-card {
+    background: #F8F7F5; border-left: 4px solid #2DA5B6;
+    border-radius: 10px; padding: 1.1rem 1.4rem; margin: .6rem 0 1rem 0;
+}
+.avea-card { margin-top: 1.6rem; }
+.avea-card h3 { margin: 0 0 .6rem 0 !important; font-size: 1.4rem; }
+.avea-card p { margin: 0 0 .6rem 0; }
+.avea-card ul { margin: 0; padding-left: 1.2rem; }
+.avea-card li { margin-bottom: .45rem; }
+
+/* status pills */
+.pill {
+    display: inline-block; border-radius: 999px; padding: .2rem .85rem;
+    font-size: .8rem; font-weight: 700; background: #F0EEEA; color: #6B6B6B;
+}
+.pill.done { background: rgba(45,165,182,.13); color: #1B7F8C; }
+.pill.err  { background: rgba(212,55,71,.12);  color: #B02A38; }
+</style>
+""",
+    unsafe_allow_html=True,
 )
 
-tab_ingest, tab_docs, tab_ask, tab_dom, tab_settings = st.tabs(
-    ["Ingest", "Documents", "Ask", "Compare two URLs", "Settings"]
+@st.cache_data
+def _logo_b64() -> str:
+    import base64
+    from pathlib import Path
+    p = Path(__file__).parent / "static" / "avea_logo.png"
+    return base64.b64encode(p.read_bytes()).decode()
+
+
+try:
+    _logo_html = f'<img src="data:image/png;base64,{_logo_b64()}" alt="AVEA"/>'
+except Exception:
+    _logo_html = "AVEA"  # fall back to text if the asset is missing
+st.markdown(
+    f'<div class="avea-header">{_logo_html}'
+    '<span class="accent">AI Visibility Analyzer</span></div>',
+    unsafe_allow_html=True,
 )
+
+# Demo-first navigation: the app opens on Ask with the sidebar collapsed;
+# the other pages are one click away in the sidebar.
+with st.sidebar:
+    page = st.radio(
+        "Section",
+        ["Ask", "Settings", "Ingest", "Documents", "Compare two URLs"],
+    )
+    mode = "Compare"
+    if page == "Ask":
+        mode = st.selectbox(
+            "Mode",
+            [
+                "Compare · surrogate vs ChatGPT + Claude",
+                "Surrogate · 7-tool deep-research agent",
+                "Retrieve only · search ingested docs",
+            ],
+            help=(
+                "Compare: the brand-visibility demo (3 systems in parallel). "
+                "Surrogate: just our agent, with visible reasoning. "
+                "Retrieve only: local doc search, no model call."
+            ),
+        )
+    st.divider()
+    test_mode = st.toggle(
+        "Test mode",
+        value=True,
+        help=(
+            "ON by default: renders the Compare results from canned data (a "
+            "real past run), no model calls. Ideal for demos and when the GPU "
+            "box is down. Turn OFF to run the question live."
+        ),
+    )
 
 # ----- INGEST ----------------------------------------------------------------
 
-with tab_ingest:
+if page == "Ingest":
+    _rag = _need_rag()
+    ingest_text, ingest_url = _rag.ingest_text, _rag.ingest_url
     st.subheader("Ingest URLs")
     urls_text = st.text_area(
         "Paste one URL per line",
@@ -85,7 +274,9 @@ with tab_ingest:
 
 # ----- DOCUMENTS --------------------------------------------------------------
 
-with tab_docs:
+if page == "Documents":
+    _rag = _need_rag()
+    delete_doc, list_docs = _rag.delete_doc, _rag.list_docs
     rows = list_docs()
     if not rows:
         st.info("Store is empty. Ingest something on the Ingest tab.")
@@ -104,36 +295,79 @@ with tab_docs:
 
 # ----- ASK --------------------------------------------------------------------
 
-with tab_ask:
-    q = st.text_input(
-        "Your question",
-        placeholder="e.g. which restaurant is the best for italian food in Tashkent",
-    )
-    mode = st.radio(
-        "Mode",
-        [
-            "Retrieve only — search ingested docs (no model call)",
-            "Surrogate — deep-research agent (7-tool ReAct loop)",
-        ],
-        horizontal=False,
-    )
-    k = st.slider(
-        "Top-k retrieved chunks (Retrieve-only mode)", 1, 10, 5,
-        help="Only used in 'Retrieve only' mode — number of chunks from the user-RAG store.",
-    )
-    compare_glm = st.checkbox(
-        "Also call GLM reference (same evidence, side-by-side)",
-        value=False,
-        help=(
-            "After the surrogate runs, send the SAME evidence pack the "
-            "surrogate gathered (tool outputs from `search`, `fetch_url`, "
-            "`extract_entity`) to the GLM reference (z.ai) and show both "
-            "answers side-by-side. Apples-to-apples fidelity comparison."
-        ),
-    )
+def _test_fixtures():
+    """Available canned fixtures for Test mode: [(question, path), …], the main
+    Swiss demo first, then anything under data/fixtures/. Used to offer a
+    question selector that mirrors the static demo."""
+    from pathlib import Path
+    import json as _json
+    paths = []
+    main = Path("data/demo_fixture.json")
+    if main.exists():
+        paths.append(main)
+    fx = Path("data/fixtures")
+    if fx.exists():
+        paths += sorted(p for p in fx.glob("*.json"))
+    out = []
+    for p in paths:
+        try:
+            q = _json.loads(p.read_text()).get("question", p.stem)
+        except Exception:
+            continue
+        out.append((q, str(p)))
+    return out
 
-    if st.button("Run", type="primary", disabled=not q.strip()):
+
+if page == "Ask":
+    # `mode` comes from the sidebar dropdown. The form makes Enter in any
+    # text field submit the run; mode-specific controls swap live because
+    # the selectbox lives outside the form.
+    brand, k, compare_glm = "Avea", 5, False
+    with st.form("ask_form", border=False):
+        if test_mode and mode.startswith("Compare"):
+            # Test mode renders canned fixtures; offer the available examples as
+            # a selector that mirrors the static demo's question dropdown.
+            _fx_opts = [q for q, _ in _test_fixtures()] or [
+                "What are the top 10 Swiss supplement brands?"]
+            q = st.selectbox("Your question", options=_fx_opts)
+        else:
+            q = st.text_input(
+                "Your question",
+                value="What are the top 10 Swiss supplement brands?" if test_mode else "",
+                placeholder="e.g. which restaurant is the best for italian food in Tashkent",
+            )
+        if mode.startswith("Compare"):
+            brand = st.text_input(
+                "Brand to track",
+                value="Avea",
+                help=(
+                    "Compare mode checks whether this brand appears in each "
+                    "system's ranked answer and generates the action plan for it."
+                ),
+            )
+        elif mode.startswith("Surrogate"):
+            compare_glm = st.checkbox(
+                "Also call GLM reference (same evidence, side-by-side)",
+                value=False,
+                help=(
+                    "After the surrogate runs, send the SAME evidence pack the "
+                    "surrogate gathered (tool outputs from `search`, `fetch_url`, "
+                    "`extract_entity`) to the GLM reference (z.ai) and show both "
+                    "answers side-by-side. Apples-to-apples fidelity comparison."
+                ),
+            )
+        else:
+            k = st.slider(
+                "Top-k retrieved chunks", 1, 10, 5,
+                help="Number of chunks returned from the user-RAG store.",
+            )
+        submitted = st.form_submit_button("Run", type="primary")
+
+    if submitted and not q.strip():
+        st.warning("Type a question first.")
+    if submitted and q.strip():
         if mode.startswith("Retrieve only"):
+            retrieve = _need_rag().retrieve
             with st.spinner("Embedding question + searching store ..."):
                 hits = retrieve(q, k=k)
             if not hits:
@@ -144,6 +378,261 @@ with tab_ask:
                         f"#{i}  score={h['score']:.3f}  · {h['title']}  ·  {h['url']}"
                     ):
                         st.text(h["text"])
+        elif mode.startswith("Compare"):
+            try:
+                from surrogate.compare import compare_run
+            except Exception as e:
+                st.error(f"could not import compare module: {e!r}")
+                st.stop()
+            if test_mode:
+                st.info(
+                    "Test mode: rendering canned results from a real past "
+                    "run. No model is called."
+                )
+            else:
+                st.info(
+                    "Running the same question through three systems in parallel: "
+                    "the surrogate (needs vLLM at localhost:8000), ChatGPT (gpt-5 + "
+                    "web_search) and Claude (web_search + extended thinking). "
+                    "Typically 3–5 minutes."
+                )
+
+            # --- live status strip --------------------------------------------
+            labels = {"surrogate": "Surrogate", "openai": "ChatGPT",
+                      "claude": "Claude", "judge": "Match scoring",
+                      "deep": "Deep analysis"}
+            def _pill(label, state):
+                cls = {"done": " done", "error": " err"}.get(state, "")
+                text = {"done": "done", "running": "running…",
+                        "waiting": "waiting"}.get(state, state)
+                return (f'<span class="pill{cls}">{label} · {text}</span>')
+
+            cols = st.columns(5)
+            slots = {}
+            for col, key in zip(cols, ["surrogate", "openai", "claude",
+                                       "judge", "deep"]):
+                slots[key] = col.empty()
+                if test_mode:
+                    slots[key].markdown(_pill(labels[key], "done"),
+                                        unsafe_allow_html=True)
+                else:
+                    init = "running" if key in ("surrogate", "openai", "claude") else "waiting"
+                    slots[key].markdown(_pill(labels[key], init),
+                                        unsafe_allow_html=True)
+
+            def _status(system, state):
+                label = labels.get(system, system)
+                if state not in ("done", "running", "waiting"):
+                    state = "error"
+                slots[system].markdown(_pill(label, state),
+                                       unsafe_allow_html=True)
+
+            if test_mode:
+                import json as _json
+                _fx_map = {q2: p for q2, p in _test_fixtures()}
+                _path = _fx_map.get(q, "data/demo_fixture.json")
+                try:
+                    with open(_path) as f:
+                        rec = _json.load(f)
+                except FileNotFoundError:
+                    st.error("data/demo_fixture.json missing. Run "
+                             "`python scripts/build_demo_fixture.py` once to create it.")
+                    st.stop()
+            else:
+                with st.spinner("Comparing: surrogate + 2 frontiers in parallel…"):
+                    try:
+                        rec = compare_run(q, brand=brand.strip() or "Avea",
+                                          status_cb=_status)
+                    except Exception as e:
+                        st.error(f"compare run failed: {e!r}")
+                        st.text(traceback.format_exc())
+                        st.stop()
+
+            sys_ = rec["systems"]
+            m = rec["matches"]
+            if rec["errors"]:
+                st.warning("Some systems failed: "
+                           + " · ".join(f"{labels.get(k, k)} ({v})"
+                                        for k, v in rec["errors"].items()))
+
+            # --- ranked-picks table (✓ + bold only in frontier columns) -------
+            sur_list = sys_["surrogate"]["ranked"]
+            oai_list = sys_["openai"]["ranked"]
+            cla_list = sys_["claude"]["ranked"]
+            oai_matched = {str(p[1]).lower()
+                           for p in (m["sur_openai"].get("matched_pairs") or [])
+                           if len(p) >= 2}
+            cla_matched = {str(p[1]).lower()
+                           for p in (m["sur_claude"].get("matched_pairs") or [])
+                           if len(p) >= 2}
+
+            def _fr_cell(pick, matched):
+                if not pick:
+                    return ""
+                if pick.lower() in matched:
+                    return f"**{pick}** ✓"
+                return pick
+
+            n_rows = max(len(sur_list), len(oai_list), len(cla_list))
+            lines = ["| # | Surrogate | ChatGPT | Claude |",
+                     "|---|-----------|---------|--------|"]
+            for i in range(n_rows):
+                s_c = sur_list[i] if i < len(sur_list) else ""
+                o_c = _fr_cell(oai_list[i] if i < len(oai_list) else "", oai_matched)
+                c_c = _fr_cell(cla_list[i] if i < len(cla_list) else "", cla_matched)
+                lines.append(f"| {i + 1} | {s_c} | {o_c} | {c_c} |")
+            st.markdown("\n".join(lines))
+            st.caption(
+                f"✓ = brand-level match with the surrogate's list · "
+                f"Surrogate↔ChatGPT {m['sur_openai']['overlap']}/{len(m['sur_openai']['a'])} · "
+                f"Surrogate↔Claude {m['sur_claude']['overlap']}/{len(m['sur_claude']['a'])} · "
+                f"ChatGPT↔Claude {m['openai_claude']['overlap']}/{len(m['openai_claude']['a'])}"
+            )
+
+            # --- suggestions panel (the headline feature) ----------------------
+            import html as _html
+            sug = rec["suggestions"]
+            card = [
+                '<div class="avea-card">',
+                f"<h3>What {_html.escape(rec['brand'])} should do</h3>",
+                f"<p>{_html.escape(sug['why'])}</p>",
+                "<ul>",
+            ]
+            for a in sug["actions"]:
+                card.append(f"<li>{_html.escape(a)}</li>")
+            card.append("</ul></div>")
+            st.markdown("".join(card), unsafe_allow_html=True)
+
+            # --- graph panels (brand visibility + domain authority …) ---------
+            from surrogate.demo_render import (
+                graph_panels, counterfactual_component_html, CHART_CSS,
+            )
+            import streamlit.components.v1 as _components
+            _panels = graph_panels(rec)
+            if _panels:
+                st.markdown(
+                    f"<style>{CHART_CSS}</style>"
+                    f"<div class='charts-row'>{''.join(_panels)}</div>",
+                    unsafe_allow_html=True)
+            # Counterfactual rendered as an isolated component so its
+            # click-through popover (assumption + verbatim re-answer) works —
+            # Streamlit's main page can't run the inline JS.
+            _cf_doc = counterfactual_component_html(rec)
+            if _cf_doc:
+                _components.html(_cf_doc, height=540, scrolling=True)
+
+            # Surrogate trajectory is rendered lower (just before the full
+            # answers) — it's dense, surrogate-specific detail. Captured here
+            # because the answers section references `traj` for its dedup note.
+            traj = rec["systems"]["surrogate"].get("trajectory") or []
+
+            # --- deeper suggestions (rubric-driven analyst output) -------------
+            deep = rec.get("deep")
+            if deep:
+                with st.expander("Deeper suggestions: competitive gaps, "
+                                 "priority plan, rival deep-dive", expanded=False):
+                    st.markdown(deep.get("summary", ""))
+
+                    gaps = deep.get("competitive_gaps") or []
+                    if gaps:
+                        st.markdown("#### What winning brands have that you don't")
+                        rows = ["| Asset | Who has it | Why it wins AI visibility | Your gap |",
+                                "|---|---|---|---|"]
+                        for g in gaps:
+                            who = ", ".join(g.get("brands_with_it") or [])
+                            rows.append(
+                                f"| **{g.get('asset', '')}** | {who} | "
+                                f"{g.get('why_it_matters', '')} | "
+                                f"{g.get('gap_for_brand', '')} |"
+                            )
+                        st.markdown("\n".join(rows))
+
+                    plan = deep.get("priority_plan") or []
+                    if plan:
+                        st.markdown("#### Do this first, in priority order")
+                        for p in sorted(plan, key=lambda x: x.get("rank", 99)):
+                            st.markdown(
+                                f"**{p.get('rank', '?')}.** {p.get('action', '')}  \n"
+                                f"&nbsp;&nbsp;&nbsp;*{p.get('horizon', '')} · "
+                                f"{p.get('effort', '')} effort · "
+                                f"{p.get('impact', '')}*"
+                            )
+
+                    rivals = deep.get("rival_deep_dive") or []
+                    if rivals:
+                        st.markdown("#### Rival deep-dive")
+                        for r in rivals:
+                            st.markdown(
+                                f"**{r.get('brand', '')}**  \n"
+                                f"*Why AI ranks them:* {r.get('why_ai_ranks_them', '')}  \n"
+                                f"*Their visible assets:* {r.get('their_visible_assets', '')}  \n"
+                                f"*How to compete:* {r.get('how_to_compete', '')}"
+                            )
+            elif not test_mode:
+                st.caption("Deeper analysis unavailable for this run.")
+
+            # --- collapsed detail ----------------------------------------------
+            with st.expander("Sources each model consulted"):
+                o_urls = sorted(set(sys_["openai"].get("urls") or []))
+                c_urls = sorted(set(sys_["claude"].get("urls") or []))
+                _osearch = 0
+                for tc in sys_["openai"].get("tool_calls") or []:
+                    a = tc.get("action") or {}
+                    _osearch += len(a.get("queries") or
+                                    ([a["query"]] if a.get("query") else []))
+                    if tc.get("kind") in ("tool_use", "web_search_call"):
+                        _osearch = max(_osearch, 1)
+                st.caption(
+                    "Claude's API exposes the pages its search returned; "
+                    "ChatGPT's only exposes URLs it explicitly cites, so its "
+                    "count can be 0 even when it searched."
+                )
+                o_hdr = (f"**ChatGPT ran {_osearch} web search(es) and cited "
+                         f"{len(o_urls)} URL(s):**" if _osearch
+                         else f"**ChatGPT cited {len(o_urls)} URL(s):**")
+                st.markdown(o_hdr)
+                for u in o_urls:
+                    st.markdown(f"- {u}")
+                st.markdown(f"**Claude consulted {len(c_urls)} URL(s):**")
+                for u in c_urls:
+                    st.markdown(f"- {u}")
+                if sys_["surrogate"].get("bundle"):
+                    st.markdown(f"**Surrogate trace bundle:** "
+                                f"`{sys_['surrogate']['bundle']}`")
+
+            with st.expander("Full answers & reasoning (verbatim)"):
+                for key in ("surrogate", "openai", "claude"):
+                    s = sys_[key]
+                    st.markdown(f"### {labels[key]} · {s.get('model', '')}")
+                    if s.get("error"):
+                        st.error(s["error"])
+                        continue
+                    # Verbatim but with clickable links: linkify_verbatim
+                    # HTML-escapes everything (so '**', '_Source:_', '$20–$50'
+                    # show as-is — no Markdown/LaTeX) and turns bare URLs into
+                    # links. st.html renders HTML without running Markdown.
+                    from surrogate.demo_render import linkify_verbatim as _lv
+                    st.html(_lv(s.get("answer") or "(empty)"))
+                    # Surrogate's "reasoning" is the interactive step-by-step
+                    # trajectory (click a phrase → sources). Rendered as an
+                    # isolated HTML component so the click JS works. Frontiers
+                    # show their verbatim thinking (no source binding possible).
+                    if key == "surrogate" and traj:
+                        import streamlit.components.v1 as _components
+                        from surrogate.demo_render import (
+                            trajectory_component_html, estimate_height,
+                        )
+                        st.markdown("**Reasoning, step by step, with sources** "
+                                    "(click a highlighted phrase to see what that "
+                                    "step pulled):")
+                        _components.html(
+                            trajectory_component_html(traj),
+                            height=estimate_height(traj),
+                            scrolling=True,
+                        )
+                    elif s.get("thinking"):
+                        st.markdown("**Reasoning (verbatim):**")
+                        st.text(s["thinking"])
         else:
             # New single-stage ReAct loop with the 7-tool engineered workflow.
             try:
@@ -271,7 +760,7 @@ with tab_ask:
 
 # ----- COMPARE TWO URLs (the DOM-crawler presentation flow) -----------------
 
-with tab_dom:
+if page == "Compare two URLs":
     st.subheader(
         "Compare two URLs",
         help=(
@@ -344,7 +833,7 @@ with tab_dom:
 
 # ----- SETTINGS (box config + tunnel control) -------------------------------
 
-with tab_settings:
+if page == "Settings":
     from surrogate import box
 
     # Push any persisted settings into os.environ on every page load so the

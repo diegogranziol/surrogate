@@ -1,0 +1,11 @@
+# Avea-life brand theme (palette pulled from avea-life.com)
+[client]
+# Hides the Deploy button and developer menu items in the top-right toolbar.
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#2DA5B6"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F8F7F5"
+textColor = "#1A1A1A"
+font = "sans serif"

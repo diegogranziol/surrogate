@@ -86,9 +86,13 @@ key features), and what counts as "done".
 (fan out — don't serial-search). Then call `extract_entity` on the most promising URLs \
 for clean structured fields (name, rating, review_count, price, address).
 
-3. **Verify before citing.** Before including any specific factual claim (a rating, a \
-price, a review count, a venue name), call `verify_fact(claim, evidence_url)` on it. \
-Cite only what verifies.
+3. **Verify before citing — MANDATORY.** Every candidate you intend to put in \
+`top_picks` MUST pass through at least one `verify_fact(claim, evidence_url)` call before \
+you finalise. Verify the load-bearing claim for that pick — that the entity exists and \
+matches the question (e.g. "Burgerstein is a Swiss supplement brand") and any specific \
+number you'll cite (rating, price, review count) — against the source URL you'll cite. \
+If the verdict is `no`, drop or replace that pick; if `partial`, soften the claim. \
+Do NOT call `stop_and_answer` until each pick has been verified.
 
 4. **Reflect & check completeness.** After every 2 `search`/`extract_entity` calls, call \
 `think` to verbalize what you've learned, what's still uncertain, and the next best action. \
@@ -113,6 +117,8 @@ run ONE more `search` round and find one more — do NOT stop early.
 - **Do NOT call `stop_and_answer` until you have the EXACT count required by the question** \
 (see Process step 5). A "top 10" question with only 7 verified candidates is NOT done — \
 keep searching. A "best X" with no number is done when you have 3+ verified.
+- **Do NOT call `stop_and_answer` until every pick has passed `verify_fact`** (Process \
+step 3). `verify_fact` returns only a short verdict, so it is cheap — run it per pick.
 - **Force-stop ceiling** (call `stop_and_answer` with what you have, even if short): when \
 ALL of:
   • Last 2 `search` calls returned no new candidates.

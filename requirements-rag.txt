@@ -1,0 +1,6 @@
+# Extra deps for the RAG / embedding operator pages (Ingest, Documents,
+# Retrieve-only). Heavy (pulls torch) — NOT needed for the Compare demo or
+# the Streamlit Community Cloud deploy. Install locally with:
+#     pip install -r requirements-rag.txt
+sentence-transformers>=3.0.0
+torchvision>=0.18.0
